@@ -1,6 +1,12 @@
 terraform {
   required_version = ">= 1.0"
 
+  # Backend remoto en GCS para persistir el estado
+  backend "gcs" {
+    bucket = ""  # Se configura en el workflow
+    prefix = "terraform/state"
+  }
+
   required_providers {
     google = {
       source  = "hashicorp/google"
