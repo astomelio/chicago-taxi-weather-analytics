@@ -3,7 +3,7 @@ terraform {
 
   # Backend remoto en GCS para persistir el estado
   backend "gcs" {
-    bucket = ""  # Se configura en el workflow
+    bucket = "" # Se configura en el workflow
     prefix = "terraform/state"
   }
 
@@ -37,7 +37,7 @@ resource "google_bigquery_dataset" "raw_dataset" {
   }
 
   lifecycle {
-    ignore_changes = [dataset_id]
+    ignore_changes        = [dataset_id]
     create_before_destroy = false
   }
 }
@@ -55,7 +55,7 @@ resource "google_bigquery_dataset" "silver_dataset" {
   }
 
   lifecycle {
-    ignore_changes = [dataset_id]
+    ignore_changes        = [dataset_id]
     create_before_destroy = false
   }
 }
@@ -73,7 +73,7 @@ resource "google_bigquery_dataset" "gold_dataset" {
   }
 
   lifecycle {
-    ignore_changes = [dataset_id]
+    ignore_changes        = [dataset_id]
     create_before_destroy = false
   }
 }
