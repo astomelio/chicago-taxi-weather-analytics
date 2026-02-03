@@ -29,6 +29,10 @@ resource "google_bigquery_dataset" "raw_dataset" {
     environment = "production"
     layer       = "raw"
   }
+
+  lifecycle {
+    ignore_changes = [dataset_id]
+  }
 }
 
 # BigQuery Dataset para datos transformados (Silver)
@@ -42,6 +46,10 @@ resource "google_bigquery_dataset" "silver_dataset" {
     environment = "production"
     layer       = "silver"
   }
+
+  lifecycle {
+    ignore_changes = [dataset_id]
+  }
 }
 
 # BigQuery Dataset para datos analíticos (Gold)
@@ -54,6 +62,10 @@ resource "google_bigquery_dataset" "gold_dataset" {
   labels = {
     environment = "production"
     layer       = "gold"
+  }
+
+  lifecycle {
+    ignore_changes = [dataset_id]
   }
 }
 
@@ -161,6 +173,7 @@ resource "google_service_account" "weather_ingestion_sa" {
   # Evitar recrear si ya existe
   lifecycle {
     prevent_destroy = false
+    ignore_changes = [account_id]
   }
 }
 
@@ -190,6 +203,10 @@ resource "google_storage_bucket" "function_source" {
   location = var.region
 
   uniform_bucket_level_access = true
+
+  lifecycle {
+    ignore_changes = [name]
+  }
 }
 
 # Subir el código de la función a Cloud Storage
@@ -276,4 +293,8 @@ resource "google_data_catalog_taxonomy" "sensitive_data" {
   display_name = "Sensitive Data Taxonomy"
   description  = "Taxonomy for sensitive data classification"
   region       = var.region
+
+  lifecycle {
+    ignore_changes = [display_name]
+  }
 }
