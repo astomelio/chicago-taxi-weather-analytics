@@ -101,25 +101,67 @@ jobs:
       
       - name: Import existing resources
         run: |
-          # Importar recursos existentes al estado de Terraform
-          set +e  # No fallar si el import falla
+          echo "🔄 Verificando y importando recursos existentes..."
           
-          echo "🔄 Importando recursos existentes..."
+          # Función para importar si el recurso existe
+          import_if_exists() {
+            local resource=$1
+            local import_id=$2
+            local resource_name=$3
+            
+            # Verificar si el recurso ya está en el estado
+            if terraform state show "$resource" &>/dev/null; then
+              echo "✓ $resource_name ya está en el estado"
+              return 0
+            fi
+            
+            # Intentar importar
+            if terraform import "$resource" "$import_id" 2>&1; then
+              echo "✅ Importado: $resource_name"
+              return 0
+            else
+              echo "⚠️  No se pudo importar $resource_name (puede que no exista o ya esté en estado)"
+              return 0  # No fallar
+            fi
+          }
           
-          terraform import google_bigquery_dataset.raw_dataset ${{ secrets.GCP_PROJECT_ID }}:chicago_taxi_raw 2>&1 | grep -v "Error importing" || echo "✓ Dataset raw"
-          terraform import google_bigquery_dataset.silver_dataset ${{ secrets.GCP_PROJECT_ID }}:chicago_taxi_silver 2>&1 | grep -v "Error importing" || echo "✓ Dataset silver"
-          terraform import google_bigquery_dataset.gold_dataset ${{ secrets.GCP_PROJECT_ID }}:chicago_taxi_gold 2>&1 | grep -v "Error importing" || echo "✓ Dataset gold"
-          terraform import google_service_account.weather_ingestion_sa projects/${{ secrets.GCP_PROJECT_ID }}/serviceAccounts/weather-ingestion-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com 2>&1 | grep -v "Error importing" || echo "✓ Service account"
-          terraform import google_storage_bucket.function_source ${{ secrets.GCP_PROJECT_ID }}-function-source 2>&1 | grep -v "Error importing" || echo "✓ Storage bucket"
+          # Importar datasets de BigQuery
+          import_if_exists "google_bigquery_dataset.raw_dataset" "${{ secrets.GCP_PROJECT_ID }}:chicago_taxi_raw" "Dataset raw"
+          import_if_exists "google_bigquery_dataset.silver_dataset" "${{ secrets.GCP_PROJECT_ID }}:chicago_taxi_silver" "Dataset silver"
+          import_if_exists "google_bigquery_dataset.gold_dataset" "${{ secrets.GCP_PROJECT_ID }}:chicago_taxi_gold" "Dataset gold"
           
-          # Intentar importar taxonomy (puede fallar si no existe)
-          terraform import google_data_catalog_taxonomy.sensitive_data projects/${{ secrets.GCP_PROJECT_ID }}/locations/${{ secrets.GCP_REGION || 'us-central1' }}/taxonomies/$(gcloud data-catalog taxonomies list --location=${{ secrets.GCP_REGION || 'us-central1' }} --format='value(name)' --project=${{ secrets.GCP_PROJECT_ID }} 2>/dev/null | head -1 | xargs basename 2>/dev/null) 2>&1 | grep -v "Error importing" || echo "⚠️  Taxonomy (puede no existir)"
+          # Importar service account
+          import_if_exists "google_service_account.weather_ingestion_sa" "projects/${{ secrets.GCP_PROJECT_ID }}/serviceAccounts/weather-ingestion-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com" "Service account"
           
-          set -e
+          # Importar storage bucket
+          import_if_exists "google_storage_bucket.function_source" "${{ secrets.GCP_PROJECT_ID }}-function-source" "Storage bucket"
+          
+          # Intentar importar taxonomy (más complejo)
+          TAXONOMY_NAME=$(gcloud data-catalog taxonomies list --location=${{ secrets.GCP_REGION || 'us-central1' }} --format='value(name)' --project=${{ secrets.GCP_PROJECT_ID }} 2>/dev/null | head -1 | xargs basename 2>/dev/null || echo "")
+          if [ -n "$TAXONOMY_NAME" ]; then
+            import_if_exists "google_data_catalog_taxonomy.sensitive_data" "projects/${{ secrets.GCP_PROJECT_ID }}/locations/${{ secrets.GCP_REGION || 'us-central1' }}/taxonomies/$TAXONOMY_NAME" "Data Catalog Taxonomy"
+          else
+            echo "⚠️  Taxonomy no encontrada (se creará si es necesario)"
+          fi
+          
+          echo "✅ Proceso de import completado"
+        continue-on-error: true
+      
+      - name: Refresh Terraform State
+        run: |
+          echo "🔄 Refrescando estado de Terraform..."
+          terraform refresh -auto-approve || true
+        env:
+          TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+          TF_VAR_developer_email: ${{ secrets.DEVELOPER_EMAIL }}
+          TF_VAR_openweather_api_key: ${{ secrets.OPENWEATHER_API_KEY || '' }}
+          TF_VAR_region: ${{ secrets.GCP_REGION || 'us-central1' }}
+          TF_VAR_chicago_latitude: 41.8781
+          TF_VAR_chicago_longitude: -87.6298
         continue-on-error: true
       
       - name: Terraform Plan
-        run: terraform plan -out=tfplan || terraform plan -out=tfplan
+        run: terraform plan -out=tfplan
         env:
           TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
           TF_VAR_developer_email: ${{ secrets.DEVELOPER_EMAIL }}
