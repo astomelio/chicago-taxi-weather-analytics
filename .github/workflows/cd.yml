@@ -79,8 +79,25 @@ jobs:
             run.googleapis.com \
             --project=${{ secrets.GCP_PROJECT_ID }}
       
+      - name: Create Terraform State Bucket
+        run: |
+          STATE_BUCKET="${{ secrets.GCP_PROJECT_ID }}-terraform-state"
+          if ! gsutil ls -b gs://$STATE_BUCKET 2>/dev/null; then
+            echo "📦 Creando bucket para estado de Terraform..."
+            gsutil mb -p ${{ secrets.GCP_PROJECT_ID }} -l ${{ secrets.GCP_REGION || 'us-central1' }} gs://$STATE_BUCKET
+            gsutil versioning set on gs://$STATE_BUCKET
+            echo "✅ Bucket creado: $STATE_BUCKET"
+          else
+            echo "✅ Bucket ya existe: $STATE_BUCKET"
+          fi
+      
       - name: Terraform Init
-        run: terraform init
+        run: |
+          STATE_BUCKET="${{ secrets.GCP_PROJECT_ID }}-terraform-state"
+          terraform init \
+            -backend-config="bucket=$STATE_BUCKET" \
+            -backend-config="prefix=terraform/state" \
+            -reconfigure
       
       - name: Import existing resources
         run: |
