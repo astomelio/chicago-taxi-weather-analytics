@@ -1,0 +1,30 @@
+version: 2
+
+models:
+  - name: daily_summary
+    description: "Daily aggregated summary of taxi trips with weather data"
+    columns:
+      - name: trip_date
+        description: "Date of the trips"
+        tests:
+          - not_null
+      - name: weather_category
+        description: "Categorized weather condition"
+      - name: avg_trip_duration_seconds
+        description: "Average trip duration in seconds"
+      - name: total_trips
+        description: "Total number of trips for the day"
+      - name: total_revenue
+        description: "Total revenue for the day"
+
+  - name: taxi_weather_analysis
+    description: "Detailed analysis of taxi trips by weather conditions and hour"
+    columns:
+      - name: trip_date
+        description: "Date of the trips"
+      - name: weather_category
+        description: "Categorized weather condition"
+      - name: trip_hour
+        description: "Hour of the day (0-23)"
+      - name: avg_trip_duration_seconds
+        description: "Average trip duration in seconds"

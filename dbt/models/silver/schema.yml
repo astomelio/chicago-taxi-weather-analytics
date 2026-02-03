@@ -1,0 +1,44 @@
+version: 2
+
+models:
+  - name: taxi_trips_silver
+    description: "Cleaned and deduplicated taxi trips data"
+    columns:
+      - name: unique_key
+        description: "Unique identifier for the trip"
+        tests:
+          - unique
+          - not_null
+      - name: trip_start_timestamp
+        description: "Timestamp when the trip started"
+        tests:
+          - not_null
+      - name: trip_seconds
+        description: "Duration of the trip in seconds"
+        tests:
+          - not_null
+      - name: trip_miles
+        description: "Distance of the trip in miles"
+      - name: fare
+        description: "Fare amount"
+      - name: tips
+        description: "Tips amount"
+      - name: trip_total
+        description: "Total trip amount"
+
+  - name: weather_silver
+    description: "Cleaned weather data"
+    columns:
+      - name: date
+        description: "Date of the weather data"
+        tests:
+          - unique
+          - not_null
+      - name: temperature
+        description: "Average temperature in Celsius"
+      - name: humidity
+        description: "Humidity percentage"
+      - name: wind_speed
+        description: "Wind speed in m/s"
+      - name: precipitation
+        description: "Precipitation in mm"

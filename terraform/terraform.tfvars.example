@@ -1,0 +1,6 @@
+project_id         = "your-gcp-project-id"
+region             = "us-central1"
+openweather_api_key = ""  # OPCIONAL - Solo si BigQuery público no tiene datos (fallback)
+developer_email    = "joaquinjesus10.jc@gmail.com"
+chicago_latitude   = 41.8781
+chicago_longitude  = -87.6298

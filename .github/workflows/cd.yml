@@ -1,0 +1,339 @@
+name: CD Pipeline - Deploy Infrastructure
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'terraform/**'
+      - 'functions/**'
+      - '.github/workflows/cd.yml'
+  workflow_dispatch:  # Permite ejecución manual
+
+env:
+  TF_VERSION: 1.5.0
+  PYTHON_VERSION: '3.9'
+
+jobs:
+  prepare-function-zip:
+    name: Prepare Cloud Function ZIP
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Create function ZIP
+        run: |
+          cd functions/weather_ingestion
+          zip -r ../../terraform/weather-ingestion-source.zip . \
+            -x "*.pyc" "__pycache__/*" "*.git*" "*.zip"
+      
+      - name: Upload ZIP artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: function-zip
+          path: terraform/weather-ingestion-source.zip
+          retention-days: 1
+
+  deploy-terraform:
+    name: Deploy Infrastructure with Terraform
+    runs-on: ubuntu-latest
+    needs: prepare-function-zip
+    defaults:
+      run:
+        working-directory: ./terraform
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Download function ZIP
+        uses: actions/download-artifact@v3
+        with:
+          name: function-zip
+          path: terraform/
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      
+      - name: Setup GCP Auth
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Setup GCP Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+      
+      - name: Enable Required APIs
+        run: |
+          gcloud services enable \
+            bigquery.googleapis.com \
+            cloudfunctions.googleapis.com \
+            cloudscheduler.googleapis.com \
+            storage.googleapis.com \
+            datacatalog.googleapis.com \
+            cloudbuild.googleapis.com \
+            run.googleapis.com \
+            --project=${{ secrets.GCP_PROJECT_ID }}
+      
+      - name: Terraform Init
+        run: terraform init
+      
+      - name: Terraform Plan
+        run: terraform plan -out=tfplan
+        env:
+          TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+          TF_VAR_developer_email: ${{ secrets.DEVELOPER_EMAIL }}
+          TF_VAR_openweather_api_key: ${{ secrets.OPENWEATHER_API_KEY || '' }}
+          TF_VAR_region: ${{ secrets.GCP_REGION || 'us-central1' }}
+          TF_VAR_chicago_latitude: 41.8781
+          TF_VAR_chicago_longitude: -87.6298
+        continue-on-error: false
+      
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+        env:
+          TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+          TF_VAR_developer_email: ${{ secrets.DEVELOPER_EMAIL }}
+          TF_VAR_openweather_api_key: ${{ secrets.OPENWEATHER_API_KEY || '' }}
+          TF_VAR_region: ${{ secrets.GCP_REGION || 'us-central1' }}
+          TF_VAR_chicago_latitude: 41.8781
+          TF_VAR_chicago_longitude: -87.6298
+        continue-on-error: false
+      
+      - name: Terraform Output
+        run: terraform output
+        env:
+          TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+          TF_VAR_developer_email: ${{ secrets.DEVELOPER_EMAIL }}
+          TF_VAR_openweather_api_key: ${{ secrets.OPENWEATHER_API_KEY || '' }}
+          TF_VAR_region: ${{ secrets.GCP_REGION || 'us-central1' }}
+          TF_VAR_chicago_latitude: 41.8781
+          TF_VAR_chicago_longitude: -87.6298
+
+  ingest-historical-weather:
+    name: Ingest Historical Weather Data
+    runs-on: ubuntu-latest
+    needs: deploy-terraform
+    defaults:
+      run:
+        working-directory: ./
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install dependencies
+        run: |
+          pip install google-cloud-bigquery requests
+      
+      - name: Setup GCP Auth
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Setup GCP Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+      
+      - name: Get Cloud Function URL
+        id: get-function-url
+        run: |
+          FUNCTION_URL=$(gcloud functions describe weather-ingestion \
+            --region=${{ secrets.GCP_REGION || 'us-central1' }} \
+            --gen2 \
+            --format="value(serviceConfig.uri)" \
+            --project=${{ secrets.GCP_PROJECT_ID }})
+          echo "url=$FUNCTION_URL" >> $GITHUB_OUTPUT
+        continue-on-error: false
+      
+      - name: Trigger Historical Ingestion
+        run: |
+          FUNCTION_URL="${{ steps.get-function-url.outputs.url }}"
+          echo "Triggering historical ingestion at: $FUNCTION_URL"
+          
+          # Obtener token de autenticación
+          TOKEN=$(gcloud auth print-identity-token)
+          
+          # Llamar a la función con modo histórico
+          # La función espera {"historical": true}
+          curl -X POST "$FUNCTION_URL" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"historical": true}' \
+            --max-time 900 \
+            --fail-with-body \
+            --show-error
+          
+          echo "✅ Historical ingestion completed"
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+
+  deploy-dbt:
+    name: Deploy dbt Models
+    runs-on: ubuntu-latest
+    needs: [deploy-terraform, ingest-historical-weather]
+    defaults:
+      run:
+        working-directory: ./dbt
+    
+    # Esperar un poco para que los datos de clima se propaguen
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install dbt and dependencies
+        run: |
+          pip install dbt-bigquery
+          pip install google-cloud-bigquery
+      
+      - name: Setup GCP Auth
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Wait for weather data
+        run: |
+          echo "⏳ Esperando a que los datos de clima estén disponibles..."
+          python3 << 'PYEOF'
+          from google.cloud import bigquery
+          import time
+          import os
+          
+          project_id = os.environ['GCP_PROJECT_ID']
+          client = bigquery.Client(project=project_id)
+          
+          max_wait = 300  # 5 minutos
+          wait_time = 0
+          check_interval = 10
+          
+          while wait_time < max_wait:
+              try:
+                  query = f"SELECT COUNT(*) as count FROM `{project_id}.chicago_taxi_raw.weather_data`"
+                  result = client.query(query).result()
+                  count = next(result).count
+                  if count > 0:
+                      print(f"✅ Datos de clima disponibles: {count} registros")
+                      exit(0)
+              except Exception as e:
+                  pass
+              time.sleep(check_interval)
+              wait_time += check_interval
+              print(f"   Esperando... ({wait_time}s)")
+          
+          print("⚠️  Timeout esperando datos de clima")
+          exit(1)
+          PYEOF
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      
+      - name: Run dbt models
+        run: |
+          dbt deps
+          echo "🔄 Ejecutando modelos silver..."
+          dbt run --models silver
+          echo "🔄 Ejecutando modelos gold..."
+          dbt run --models gold
+          dbt test
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          DBT_DATASET: chicago_taxi_silver
+      
+      - name: Verify Data
+        run: |
+          echo "Verifying data in BigQuery..."
+          python3 << 'PYEOF'
+          from google.cloud import bigquery
+          import os
+          
+          client = bigquery.Client(project=os.environ['GCP_PROJECT_ID'])
+          
+          # Verificar datos en silver
+          query_silver = """
+          SELECT COUNT(*) as count 
+          FROM `{}.chicago_taxi_silver.taxi_trips_silver`
+          """.format(os.environ['GCP_PROJECT_ID'])
+          
+          result_silver = client.query(query_silver).result()
+          count_silver = next(result_silver).count
+          print(f"✅ Silver layer: {count_silver:,} taxi trips")
+          
+          # Verificar datos en gold
+          query_gold = """
+          SELECT COUNT(*) as count 
+          FROM `{}.chicago_taxi_gold.daily_summary`
+          """.format(os.environ['GCP_PROJECT_ID'])
+          
+          result_gold = client.query(query_gold).result()
+          count_gold = next(result_gold).count
+          print(f"✅ Gold layer: {count_gold:,} daily summaries")
+          
+          # Verificar datos de clima
+          query_weather = """
+          SELECT COUNT(*) as count 
+          FROM `{}.chicago_taxi_raw.weather_data`
+          """.format(os.environ['GCP_PROJECT_ID'])
+          
+          result_weather = client.query(query_weather).result()
+          count_weather = next(result_weather).count
+          print(f"✅ Weather data: {count_weather} days")
+          
+          if count_silver > 0 and count_gold > 0 and count_weather > 0:
+            print("\n✅ All data layers populated successfully!")
+            exit(0)
+          else:
+            print("\n⚠️  Some data layers are empty")
+            exit(1)
+          PYEOF
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      
+      - name: Prepare Looker Studio Dashboard
+        run: |
+          echo "🎨 Preparing Looker Studio dashboard template..."
+          python3 << 'PYEOF'
+          import json
+          import os
+          
+          project_id = os.environ['GCP_PROJECT_ID']
+          
+          # Generar template del dashboard
+          template = {
+              "version": "1.0",
+              "projectId": project_id,
+              "dataSource": {
+                  "type": "BIGQUERY",
+                  "projectId": project_id,
+                  "datasetId": "chicago_taxi_gold",
+                  "tableId": "daily_summary"
+              },
+              "instructions": {
+                  "step1": f"Go to https://lookerstudio.google.com/",
+                  "step2": "Click 'Create' > 'Report'",
+                  "step3": f"Add data source: BigQuery > {project_id} > chicago_taxi_gold > daily_summary",
+                  "step4": "Follow CREAR_DASHBOARD.md for detailed visualizations"
+              }
+          }
+          
+          with open('looker_dashboard_template.json', 'w') as f:
+              json.dump(template, f, indent=2)
+          
+          print("✅ Dashboard template created: looker_dashboard_template.json")
+          print(f"📊 Connect to: {project_id}.chicago_taxi_gold.daily_summary")
+          PYEOF
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
