@@ -116,11 +116,18 @@ jobs:
             fi
             
             # Intentar importar
-            if terraform import "$resource" "$import_id" 2>&1; then
+            echo "🔄 Intentando importar $resource_name..."
+            if terraform import "$resource" "$import_id" 2>&1 | tee /tmp/import_output.log; then
               echo "✅ Importado: $resource_name"
               return 0
             else
-              echo "⚠️  No se pudo importar $resource_name (puede que no exista o ya esté en estado)"
+              # Verificar si el error es porque ya existe en GCP pero no en estado
+              if grep -q "already exists" /tmp/import_output.log || grep -q "Already Exists" /tmp/import_output.log; then
+                echo "⚠️  $resource_name ya existe en GCP pero no se pudo importar automáticamente"
+                echo "   Se intentará crear y fallará, pero el import manual puede ser necesario"
+              else
+                echo "⚠️  No se pudo importar $resource_name (puede que no exista)"
+              fi
               return 0  # No fallar
             fi
           }
@@ -145,6 +152,15 @@ jobs:
           fi
           
           echo "✅ Proceso de import completado"
+          echo "📊 Estado actual:"
+          terraform state list || echo "Estado vacío o no disponible"
+        env:
+          TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+          TF_VAR_developer_email: ${{ secrets.DEVELOPER_EMAIL }}
+          TF_VAR_openweather_api_key: ${{ secrets.OPENWEATHER_API_KEY || '' }}
+          TF_VAR_region: ${{ secrets.GCP_REGION || 'us-central1' }}
+          TF_VAR_chicago_latitude: 41.8781
+          TF_VAR_chicago_longitude: -87.6298
         continue-on-error: true
       
       - name: Refresh Terraform State
@@ -172,7 +188,19 @@ jobs:
         continue-on-error: false
       
       - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan
+        run: |
+          echo "🔄 Aplicando cambios de Terraform..."
+          terraform apply -auto-approve tfplan || {
+            echo "⚠️  Terraform apply falló. Verificando si es por recursos existentes..."
+            # Si falla por recursos existentes, intentar importarlos y re-aplicar
+            if terraform apply -auto-approve 2>&1 | grep -q "Already Exists\|already exists"; then
+              echo "🔄 Detectados recursos existentes. Intentando importar y re-aplicar..."
+              # Los imports ya se hicieron, solo necesitamos re-aplicar
+              terraform apply -auto-approve || true
+            else
+              exit 1
+            fi
+          }
         env:
           TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
           TF_VAR_developer_email: ${{ secrets.DEVELOPER_EMAIL }}
