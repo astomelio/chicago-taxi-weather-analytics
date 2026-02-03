@@ -65,20 +65,20 @@ jobs:
           else
             echo "⚠️  dbt/profiles.yml no encontrado, creando uno básico..."
             cat > ~/.dbt/profiles.yml << 'PROFEOF'
-chicago_taxi_analysis:
-  target: dev
-  outputs:
-    dev:
-      type: bigquery
-      method: oauth
-      project: "${GCP_PROJECT_ID}"
-      dataset: "${DBT_DATASET:-chicago_taxi_silver}"
-      location: us-central1
-      threads: 4
-      timeout_seconds: 300
-      priority: interactive
-      maximum_bytes_billed: 1000000000
-PROFEOF
+          chicago_taxi_analysis:
+            target: dev
+            outputs:
+              dev:
+                type: bigquery
+                method: oauth
+                project: "${GCP_PROJECT_ID}"
+                dataset: "${DBT_DATASET:-chicago_taxi_silver}"
+                location: us-central1
+                threads: 4
+                timeout_seconds: 300
+                priority: interactive
+                maximum_bytes_billed: 1000000000
+          PROFEOF
           fi
           echo "✅ dbt profiles configurado en ~/.dbt/profiles.yml"
       
