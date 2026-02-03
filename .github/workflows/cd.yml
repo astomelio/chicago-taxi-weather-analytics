@@ -102,11 +102,28 @@ jobs:
       - name: Force Unlock Terraform State (if locked)
         run: |
           echo "🔓 Verificando si hay locks en el estado de Terraform..."
-          # Intentar obtener el lock ID si existe
-          LOCK_ID=$(gsutil cat "gs://${{ secrets.GCP_PROJECT_ID }}-terraform-state/terraform/state/default.tflock" 2>/dev/null | grep -oP 'ID:\s+\K[0-9]+' || echo "")
-          if [ -n "$LOCK_ID" ]; then
-            echo "⚠️  Lock detectado (ID: $LOCK_ID). Forzando unlock..."
-            terraform force-unlock -force "$LOCK_ID" || echo "⚠️  No se pudo forzar unlock (puede que ya esté liberado)"
+          STATE_BUCKET="${{ secrets.GCP_PROJECT_ID }}-terraform-state"
+          LOCK_FILE="gs://${STATE_BUCKET}/terraform/state/default.tflock"
+          
+          # Verificar si el archivo de lock existe
+          if gsutil stat "$LOCK_FILE" &>/dev/null; then
+            echo "⚠️  Lock detectado. Intentando leer información del lock..."
+            LOCK_CONTENT=$(gsutil cat "$LOCK_FILE" 2>/dev/null || echo "")
+            
+            # Extraer el Lock ID del contenido
+            LOCK_ID=$(echo "$LOCK_CONTENT" | grep -E "^\s*ID:\s*[0-9]+" | sed -E 's/^\s*ID:\s*([0-9]+).*/\1/' | head -1 || echo "")
+            
+            if [ -n "$LOCK_ID" ]; then
+              echo "🔓 Lock ID encontrado: $LOCK_ID. Forzando unlock..."
+              terraform force-unlock -force "$LOCK_ID" || {
+                echo "⚠️  No se pudo forzar unlock con terraform. Intentando eliminar el lock directamente..."
+                # Como último recurso, eliminar el archivo de lock directamente
+                gsutil rm "$LOCK_FILE" 2>/dev/null && echo "✅ Lock eliminado directamente" || echo "⚠️  No se pudo eliminar el lock"
+              }
+            else
+              echo "⚠️  Lock detectado pero no se pudo extraer el ID. Eliminando lock directamente..."
+              gsutil rm "$LOCK_FILE" 2>/dev/null && echo "✅ Lock eliminado" || echo "⚠️  No se pudo eliminar el lock"
+            fi
           else
             echo "✅ No hay locks activos"
           fi
