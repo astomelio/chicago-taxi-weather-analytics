@@ -99,6 +99,22 @@ jobs:
             -backend-config="prefix=terraform/state" \
             -reconfigure
       
+      - name: Force Unlock Terraform State (if locked)
+        run: |
+          echo "🔓 Verificando si hay locks en el estado de Terraform..."
+          # Intentar obtener el lock ID si existe
+          LOCK_ID=$(gsutil cat "gs://${{ secrets.GCP_PROJECT_ID }}-terraform-state/terraform/state/default.tflock" 2>/dev/null | grep -oP 'ID:\s+\K[0-9]+' || echo "")
+          if [ -n "$LOCK_ID" ]; then
+            echo "⚠️  Lock detectado (ID: $LOCK_ID). Forzando unlock..."
+            terraform force-unlock -force "$LOCK_ID" || echo "⚠️  No se pudo forzar unlock (puede que ya esté liberado)"
+          else
+            echo "✅ No hay locks activos"
+          fi
+        continue-on-error: true
+        env:
+          TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+          TF_VAR_region: ${{ secrets.GCP_REGION || 'us-central1' }}
+      
       - name: Import existing resources
         run: |
           echo "🔄 Verificando y importando recursos existentes..."
@@ -182,8 +198,8 @@ jobs:
       - name: Terraform Apply
         run: |
           echo "🔄 Aplicando cambios de Terraform..."
-          # Intentar aplicar el plan
-          if terraform apply -auto-approve tfplan 2>&1 | tee /tmp/apply_output.log; then
+          # Intentar aplicar el plan con timeout para el lock
+          if terraform apply -auto-approve -lock-timeout=5m tfplan 2>&1 | tee /tmp/apply_output.log; then
             echo "✅ Terraform apply exitoso"
             exit 0
           else
