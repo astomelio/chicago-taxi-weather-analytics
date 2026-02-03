@@ -185,7 +185,7 @@ jobs:
         continue-on-error: true
       
       - name: Terraform Plan
-        run: terraform plan -out=tfplan
+        run: terraform plan -out=tfplan -lock-timeout=5m
         env:
           TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
           TF_VAR_developer_email: ${{ secrets.DEVELOPER_EMAIL }}
@@ -219,7 +219,7 @@ jobs:
               
               # Re-aplicar sin el plan (para que use el estado actualizado)
               echo "🔄 Re-aplicando con estado actualizado..."
-              terraform apply -auto-approve || {
+              terraform apply -auto-approve -lock-timeout=5m || {
                 echo "⚠️  Re-apply también falló, pero algunos recursos pueden haberse creado"
                 exit 0  # No fallar completamente
               }
