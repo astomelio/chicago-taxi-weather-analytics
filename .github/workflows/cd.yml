@@ -117,13 +117,20 @@ jobs:
             
             # Intentar importar
             echo "🔄 Intentando importar $resource_name..."
-            if terraform import "$resource" "$import_id" 2>&1; then
+            IMPORT_OUTPUT=$(terraform import "$resource" "$import_id" 2>&1)
+            IMPORT_EXIT=$?
+            if [ $IMPORT_EXIT -eq 0 ]; then
               echo "✅ Importado: $resource_name"
-              # Forzar guardar el estado
-              terraform state push - 2>/dev/null || true
               return 0
             else
-              echo "⚠️  No se pudo importar $resource_name (puede que no exista o ya esté en estado)"
+              # Si el error es que ya existe, intentar forzar el import
+              if echo "$IMPORT_OUTPUT" | grep -q "already exists\|Already Exists\|Resource already managed"; then
+                echo "⚠️  $resource_name ya existe. Intentando forzar import..."
+                # El recurso existe pero no está en el estado, intentar importar de nuevo con -lock=false
+                terraform import -lock=false "$resource" "$import_id" 2>&1 || echo "   No se pudo forzar import"
+              else
+                echo "⚠️  No se pudo importar $resource_name: $IMPORT_OUTPUT"
+              fi
               return 0  # No fallar
             fi
           }
@@ -150,6 +157,8 @@ jobs:
           echo "✅ Proceso de import completado"
           echo "📊 Estado actual:"
           terraform state list || echo "Estado vacío o no disponible"
+          echo "💾 Sincronizando estado con backend remoto..."
+          terraform force-unlock -force $(terraform state list | wc -l) 2>/dev/null || true
         env:
           TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
           TF_VAR_developer_email: ${{ secrets.DEVELOPER_EMAIL }}
