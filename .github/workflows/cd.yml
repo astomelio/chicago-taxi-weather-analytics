@@ -117,17 +117,13 @@ jobs:
             
             # Intentar importar
             echo "🔄 Intentando importar $resource_name..."
-            if terraform import "$resource" "$import_id" 2>&1 | tee /tmp/import_output.log; then
+            if terraform import "$resource" "$import_id" 2>&1; then
               echo "✅ Importado: $resource_name"
+              # Forzar guardar el estado
+              terraform state push - 2>/dev/null || true
               return 0
             else
-              # Verificar si el error es porque ya existe en GCP pero no en estado
-              if grep -q "already exists" /tmp/import_output.log || grep -q "Already Exists" /tmp/import_output.log; then
-                echo "⚠️  $resource_name ya existe en GCP pero no se pudo importar automáticamente"
-                echo "   Se intentará crear y fallará, pero el import manual puede ser necesario"
-              else
-                echo "⚠️  No se pudo importar $resource_name (puede que no exista)"
-              fi
+              echo "⚠️  No se pudo importar $resource_name (puede que no exista o ya esté en estado)"
               return 0  # No fallar
             fi
           }
@@ -154,19 +150,6 @@ jobs:
           echo "✅ Proceso de import completado"
           echo "📊 Estado actual:"
           terraform state list || echo "Estado vacío o no disponible"
-        env:
-          TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
-          TF_VAR_developer_email: ${{ secrets.DEVELOPER_EMAIL }}
-          TF_VAR_openweather_api_key: ${{ secrets.OPENWEATHER_API_KEY || '' }}
-          TF_VAR_region: ${{ secrets.GCP_REGION || 'us-central1' }}
-          TF_VAR_chicago_latitude: 41.8781
-          TF_VAR_chicago_longitude: -87.6298
-        continue-on-error: true
-      
-      - name: Refresh Terraform State
-        run: |
-          echo "🔄 Refrescando estado de Terraform..."
-          terraform refresh -auto-approve || true
         env:
           TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
           TF_VAR_developer_email: ${{ secrets.DEVELOPER_EMAIL }}
