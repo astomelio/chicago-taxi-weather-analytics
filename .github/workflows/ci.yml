@@ -71,8 +71,8 @@ jobs:
               dev:
                 type: bigquery
                 method: oauth
-                project: "${GCP_PROJECT_ID}"
-                dataset: "${DBT_DATASET:-chicago_taxi_silver}"
+                project: "{{ env_var('GCP_PROJECT_ID') }}"
+                dataset: "{{ env_var('DBT_DATASET', 'chicago_taxi_silver') }}"
                 location: us-central1
                 threads: 4
                 timeout_seconds: 300
