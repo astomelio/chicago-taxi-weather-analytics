@@ -1,14 +1,13 @@
 {{
   config(
     materialized='table',
-    schema='silver',
-    cluster_by=['date']
+    schema='silver'
   )
 }}
 
 WITH raw_weather AS (
   SELECT *
-  FROM `{{ var('project_id') }}.{{ var('raw_dataset') }}.weather_data`
+  FROM `{{ env_var('GCP_PROJECT_ID') }}.chicago_taxi_raw.weather_data`
   WHERE date >= '2023-06-01'
     AND date <= '2023-12-31'
 ),
@@ -51,4 +50,3 @@ SELECT
     ELSE 'Hot'
   END AS temperature_category
 FROM deduplicated_weather
-ORDER BY date

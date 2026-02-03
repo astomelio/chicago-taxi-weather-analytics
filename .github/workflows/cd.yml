@@ -305,16 +305,55 @@ jobs:
           echo "url=$FUNCTION_URL" >> $GITHUB_OUTPUT
         continue-on-error: false
       
+      - name: Check if historical data exists
+        id: check-historical
+        run: |
+          python3 << 'PYEOF'
+          from google.cloud import bigquery
+          import os
+          
+          project_id = os.environ['GCP_PROJECT_ID']
+          client = bigquery.Client(project=project_id)
+          
+          # Verificar si ya existen datos históricos (junio-diciembre 2023)
+          query = f"""
+          SELECT COUNT(*) as count 
+          FROM `{project_id}.chicago_taxi_raw.weather_data`
+          WHERE date >= '2023-06-01' AND date <= '2023-12-31'
+          """
+          
+          try:
+              result = client.query(query).result()
+              count = next(result).count
+              
+              print(f"📊 Datos históricos encontrados: {count} días")
+              
+              # Si hay al menos 180 días (6 meses), considerar que los datos históricos ya existen
+              if count >= 180:
+                  print("✅ Datos históricos ya existen. Saltando ingesta histórica.")
+                  with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                      f.write("needs_historical=false\n")
+              else:
+                  print(f"⚠️  Solo hay {count} días. Necesitamos ingesta histórica.")
+                  with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                      f.write("needs_historical=true\n")
+          except Exception as e:
+              print(f"⚠️  Error verificando datos: {e}. Asumiendo que necesitamos ingesta histórica.")
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                  f.write("needs_historical=true\n")
+          PYEOF
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GITHUB_OUTPUT: ${{ github.output }}
+      
       - name: Trigger Historical Ingestion
+        if: steps.check-historical.outputs.needs_historical == 'true'
         run: |
           FUNCTION_URL="${{ steps.get-function-url.outputs.url }}"
-          echo "Triggering historical ingestion at: $FUNCTION_URL"
+          echo "🔄 Triggering historical ingestion at: $FUNCTION_URL"
           
-          # Obtener token de autenticación
           TOKEN=$(gcloud auth print-identity-token)
           
-          # Llamar a la función con modo histórico
-          # La función espera {"historical": true}
           curl -X POST "$FUNCTION_URL" \
             -H "Authorization: Bearer $TOKEN" \
             -H "Content-Type: application/json" \
@@ -326,6 +365,11 @@ jobs:
           echo "✅ Historical ingestion completed"
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      
+      - name: Skip Historical Ingestion
+        if: steps.check-historical.outputs.needs_historical == 'false'
+        run: |
+          echo "⏭️  Datos históricos ya existen. Saltando ingesta histórica."
 
   deploy-dbt:
     name: Deploy dbt Models

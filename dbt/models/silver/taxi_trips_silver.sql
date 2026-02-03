@@ -13,7 +13,7 @@
 
 WITH raw_trips AS (
   SELECT *
-  FROM `bigquery-public-data.chicago_taxi_trips.taxi_trips`
+  FROM `{{ env_var('GCP_PROJECT_ID') }}.chicago_taxi_raw.taxi_trips_raw`
   WHERE trip_start_timestamp IS NOT NULL
     AND trip_seconds IS NOT NULL
     AND trip_seconds > 0
