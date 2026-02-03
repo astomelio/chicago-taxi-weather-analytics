@@ -8,7 +8,7 @@ resource "google_bigquery_table" "looker_studio_view" {
   table_id   = "looker_studio_dashboard_data"
 
   view {
-    query = <<-SQL
+    query          = <<-SQL
       SELECT 
         date,
         total_trips,
@@ -46,7 +46,7 @@ resource "google_bigquery_table" "looker_studio_view" {
   }
 
   description = "Vista optimizada para Looker Studio dashboard"
-  
+
   labels = {
     purpose = "looker-studio"
     layer   = "gold"

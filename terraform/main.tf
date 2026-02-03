@@ -1,6 +1,6 @@
 terraform {
   required_version = ">= 1.0"
-  
+
   required_providers {
     google = {
       source  = "hashicorp/google"
@@ -128,7 +128,7 @@ resource "google_bigquery_table" "taxi_trips_raw" {
   table_id   = "taxi_trips_raw"
 
   view {
-    query = <<-SQL
+    query          = <<-SQL
       SELECT 
         unique_key,
         taxi_id,
@@ -157,7 +157,7 @@ resource "google_bigquery_table" "taxi_trips_raw" {
     SQL
     use_legacy_sql = false
   }
-  
+
   # Si falla la creación, no bloquear el resto del despliegue
   lifecycle {
     ignore_changes = [view]
@@ -169,11 +169,11 @@ resource "google_service_account" "weather_ingestion_sa" {
   account_id   = "weather-ingestion-sa"
   display_name = "Service Account for Weather Data Ingestion"
   description  = "Service account for Cloud Function that ingests weather data"
-  
+
   # Evitar recrear si ya existe
   lifecycle {
     prevent_destroy = false
-    ignore_changes = [account_id]
+    ignore_changes  = [account_id]
   }
 }
 
@@ -214,7 +214,7 @@ resource "google_storage_bucket_object" "function_source" {
   name   = "weather-ingestion-source.zip"
   bucket = google_storage_bucket.function_source.name
   source = "${path.module}/weather-ingestion-source.zip"
-  
+
   # El ZIP debe estar en el directorio terraform/
   # Se crea con: cd functions/weather_ingestion && zip -r ../../terraform/weather-ingestion-source.zip .
 }
@@ -247,9 +247,9 @@ resource "google_cloudfunctions2_function" "weather_ingestion" {
     timeout_seconds       = 540
     service_account_email = google_service_account.weather_ingestion_sa.email
     environment_variables = {
-      PROJECT_ID        = var.project_id
-      DATASET_ID        = google_bigquery_dataset.raw_dataset.dataset_id
-      TABLE_ID          = google_bigquery_table.weather_raw.table_id
+      PROJECT_ID          = var.project_id
+      DATASET_ID          = google_bigquery_dataset.raw_dataset.dataset_id
+      TABLE_ID            = google_bigquery_table.weather_raw.table_id
       OPENWEATHER_API_KEY = var.openweather_api_key
     }
   }
@@ -257,11 +257,11 @@ resource "google_cloudfunctions2_function" "weather_ingestion" {
 
 # Cloud Scheduler para ejecutar la función diariamente
 resource "google_cloud_scheduler_job" "weather_ingestion_daily" {
-  name             = "weather-ingestion-daily"
-  description      = "Daily job to ingest previous day's weather data"
-  schedule         = "0 2 * * *" # 2 AM UTC daily
-  time_zone        = "UTC"
-  region           = var.region
+  name        = "weather-ingestion-daily"
+  description = "Daily job to ingest previous day's weather data"
+  schedule    = "0 2 * * *" # 2 AM UTC daily
+  time_zone   = "UTC"
+  region      = var.region
 
   http_target {
     http_method = "POST"

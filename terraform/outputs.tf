@@ -26,11 +26,11 @@ output "scheduler_job_name" {
 output "looker_studio_connection_info" {
   description = "Información para conectar Looker Studio a BigQuery automáticamente"
   value = {
-    project_id   = var.project_id
-    dataset_id   = google_bigquery_dataset.gold_dataset.dataset_id
-    table_id     = "daily_summary"
-    full_path    = "${var.project_id}.${google_bigquery_dataset.gold_dataset.dataset_id}.daily_summary"
+    project_id     = var.project_id
+    dataset_id     = google_bigquery_dataset.gold_dataset.dataset_id
+    table_id       = "daily_summary"
+    full_path      = "${var.project_id}.${google_bigquery_dataset.gold_dataset.dataset_id}.daily_summary"
     connection_url = "https://lookerstudio.google.com/datasources/create?connectorId=bigquery&projectId=${var.project_id}&datasetId=${google_bigquery_dataset.gold_dataset.dataset_id}&tableId=daily_summary"
-    instructions = "Click en la URL arriba o ve a Looker Studio > Create > Report > BigQuery > ${var.project_id} > ${google_bigquery_dataset.gold_dataset.dataset_id} > daily_summary"
+    instructions   = "Click en la URL arriba o ve a Looker Studio > Create > Report > BigQuery > ${var.project_id} > ${google_bigquery_dataset.gold_dataset.dataset_id} > daily_summary"
   }
 }
