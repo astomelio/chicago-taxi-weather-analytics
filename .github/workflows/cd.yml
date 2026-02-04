@@ -6,6 +6,8 @@ on:
     paths:
       - 'terraform/**'
       - 'functions/**'
+      - 'airflow/**'
+      - 'dbt/**'
       - '.github/workflows/cd.yml'
   workflow_dispatch:  # Permite ejecución manual
 
@@ -382,6 +384,20 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 2  # Necesario para detectar cambios
+      
+      - name: Detect changes in Airflow files
+        id: changes
+        uses: dorny/paths-filter@v2
+        with:
+          filters: |
+            airflow:
+              - 'airflow/**'
+            dbt:
+              - 'dbt/**'
+            airflow_config:
+              - '.github/workflows/cd.yml'
       
       - name: Setup GCP Auth
         uses: google-github-actions/auth@v1
@@ -518,8 +534,6 @@ jobs:
           echo "1. Espera 20-30 minutos"
           echo "2. Verifica el estado en:"
           echo "   https://console.cloud.google.com/composer/environments?project=$PROJECT_ID"
-          echo "3. Cuando esté listo, ejecuta manualmente:"
-          echo "   ./scripts/setup_airflow.sh"
           echo ""
           echo "⚠️  Continuando sin subir DAGs (se pueden subir después manualmente)"
           echo "bucket=" >> $GITHUB_OUTPUT
@@ -528,45 +542,88 @@ jobs:
           GCP_REGION: ${{ secrets.GCP_REGION || 'us-central1' }}
         continue-on-error: true
       
+      - name: Determine if uploads are needed
+        id: should-upload
+        run: |
+          # Subir archivos si:
+          # 1. Composer se acaba de crear (no existía antes), O
+          # 2. Hay cambios en archivos de Airflow o dbt, O
+          # 3. Es una ejecución manual (workflow_dispatch)
+          COMPOSER_WAS_CREATED="${{ steps.check-composer.outputs.exists != 'true' }}"
+          AIRFLOW_CHANGED="${{ steps.changes.outputs.airflow == 'true' }}"
+          DBT_CHANGED="${{ steps.changes.outputs.dbt == 'true' }}"
+          CONFIG_CHANGED="${{ steps.changes.outputs.airflow_config == 'true' }}"
+          IS_MANUAL="${{ github.event_name == 'workflow_dispatch' }}"
+          
+          # En ejecución manual, siempre subir si hay bucket disponible
+          if [ "$IS_MANUAL" == "true" ]; then
+            echo "✅ Ejecución manual detectada - se actualizarán los archivos"
+            echo "upload=true" >> $GITHUB_OUTPUT
+          elif [ "$COMPOSER_WAS_CREATED" == "true" ] || \
+               [ "$AIRFLOW_CHANGED" == "true" ] || \
+               [ "$DBT_CHANGED" == "true" ] || \
+               [ "$CONFIG_CHANGED" == "true" ]; then
+            echo "✅ Se necesita actualizar archivos en Composer"
+            echo "   - Composer recién creado: $COMPOSER_WAS_CREATED"
+            echo "   - Cambios en Airflow: $AIRFLOW_CHANGED"
+            echo "   - Cambios en dbt: $DBT_CHANGED"
+            echo "   - Cambios en config: $CONFIG_CHANGED"
+            echo "upload=true" >> $GITHUB_OUTPUT
+          else
+            echo "⏭️  No hay cambios en archivos de Airflow. Saltando actualización."
+            echo "upload=false" >> $GITHUB_OUTPUT
+          fi
+      
       - name: Upload DAGs to Composer
-        if: steps.get-bucket.outputs.bucket != ''
+        if: steps.get-bucket.outputs.bucket != '' && steps.should-upload.outputs.upload == 'true'
         run: |
           BUCKET="${{ steps.get-bucket.outputs.bucket }}"
           echo "📤 Subiendo DAGs a Composer..."
-          gsutil -m cp -r airflow/dags/* "gs://$BUCKET/dags/" || true
+          gsutil -m cp -r airflow/dags/*.py "gs://$BUCKET/dags/" || true
+          if [ -f "airflow/dags/requirements.txt" ]; then
+            gsutil cp airflow/dags/requirements.txt "gs://$BUCKET/data/requirements.txt" || true
+          fi
           echo "✅ DAGs subidos"
         continue-on-error: true
       
       - name: Upload dbt to Composer
-        if: steps.get-bucket.outputs.bucket != ''
+        if: steps.get-bucket.outputs.bucket != '' && steps.should-upload.outputs.upload == 'true'
         run: |
           BUCKET="${{ steps.get-bucket.outputs.bucket }}"
           echo "📤 Subiendo dbt a Composer..."
-          gsutil -m cp -r dbt/* "gs://$BUCKET/dags/dbt/" || true
+          gsutil -m cp -r dbt/* "gs://$BUCKET/data/dbt/" || true
           echo "✅ dbt subido"
         continue-on-error: true
       
       - name: Upload service account key to Composer
-        if: steps.get-bucket.outputs.bucket != ''
+        if: steps.get-bucket.outputs.bucket != '' && steps.should-upload.outputs.upload == 'true'
         run: |
           BUCKET="${{ steps.get-bucket.outputs.bucket }}"
           if [ -f "github-actions-key.json" ]; then
             echo "📤 Subiendo service account key..."
-            gsutil cp github-actions-key.json "gs://$BUCKET/dags/service-account-key.json" || true
+            gsutil cp github-actions-key.json "gs://$BUCKET/data/github-actions-key.json" || true
             echo "✅ Service account key subido"
           else
             echo "⚠️  github-actions-key.json no encontrado. Usando credenciales por defecto."
           fi
         continue-on-error: true
       
-      - name: Skip uploads (Composer not ready)
-        if: steps.get-bucket.outputs.bucket == ''
+      - name: Skip uploads (no changes or Composer not ready)
+        if: steps.get-bucket.outputs.bucket == '' || steps.should-upload.outputs.upload != 'true'
         run: |
-          echo "⏭️  Saltando subida de archivos - Composer aún no está listo"
-          echo "   Ejecuta manualmente cuando Composer esté listo:"
-          echo "   ./scripts/setup_airflow.sh"
+          if [ "${{ steps.get-bucket.outputs.bucket }}" == "" ]; then
+            echo "⏭️  Saltando subida de archivos - Composer aún no está listo"
+            echo "   El entorno puede estar aún creándose (tarda 20-30 minutos)"
+          else
+            echo "⏭️  Saltando subida de archivos - No hay cambios en archivos de Airflow"
+            echo "   Los archivos solo se actualizan cuando hay cambios en:"
+            echo "   - airflow/**"
+            echo "   - dbt/**"
+            echo "   - .github/workflows/cd.yml"
+          fi
       
       - name: Set Airflow variables
+        if: steps.get-bucket.outputs.bucket != '' && (steps.should-upload.outputs.upload == 'true' || steps.check-composer.outputs.exists != 'true')
         run: |
           PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
           REGION="${{ secrets.GCP_REGION || 'us-central1' }}"
@@ -579,7 +636,12 @@ jobs:
             --location "$REGION" \
             variables -- \
             --set GCP_PROJECT_ID "$PROJECT_ID" \
-            --set GCP_REGION "$REGION" || echo "⚠️  Error configurando variables (puede requerir Airflow CLI)"
+            --set GCP_REGION "$REGION" \
+            --set DBT_PROJECT_DIR "/home/airflow/gcs/data/dbt" \
+            --set DBT_PROFILES_DIR "/home/airflow/gcs/data/dbt" \
+            --set DBT_PROFILE "chicago_taxi_analysis" \
+            --set GCP_SA_KEY_PATH "/home/airflow/gcs/data/github-actions-key.json" \
+            --set OPENWEATHER_API_KEY "${{ secrets.OPENWEATHER_API_KEY || '' }}" || echo "⚠️  Error configurando variables (puede requerir Airflow CLI)"
           
           echo "✅ Variables configuradas"
         env:
