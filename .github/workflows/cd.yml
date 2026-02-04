@@ -444,15 +444,29 @@ jobs:
           
           echo "🔍 Verificando si existe el entorno de Composer..."
           
-          if gcloud composer environments describe "$COMPOSER_ENV" \
+          # Verificar si existe (puede estar en cualquier estado: RUNNING, CREATING, UPDATING, etc.)
+          ENV_INFO=$(gcloud composer environments describe "$COMPOSER_ENV" \
             --location "$REGION" \
             --project "$PROJECT_ID" \
-            --format="value(name)" 2>/dev/null | grep -q "$COMPOSER_ENV"; then
-            echo "✅ Composer environment existe"
+            --format="value(name,state)" 2>/dev/null || echo "")
+          
+          if [ -n "$ENV_INFO" ]; then
+            ENV_STATE=$(echo "$ENV_INFO" | awk '{print $NF}')
+            echo "✅ Composer environment existe (estado: $ENV_STATE)"
             echo "exists=true" >> $GITHUB_OUTPUT
+            echo "state=$ENV_STATE" >> $GITHUB_OUTPUT
+            
+            # Si está creándose, no intentar crearlo de nuevo
+            if [ "$ENV_STATE" == "CREATING" ] || [ "$ENV_STATE" == "UPDATING" ]; then
+              echo "⚠️  Composer está en proceso de creación/actualización. No se intentará crear de nuevo."
+              echo "creating=true" >> $GITHUB_OUTPUT
+            else
+              echo "creating=false" >> $GITHUB_OUTPUT
+            fi
           else
             echo "⚠️  Composer environment no existe"
             echo "exists=false" >> $GITHUB_OUTPUT
+            echo "creating=false" >> $GITHUB_OUTPUT
           fi
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
@@ -460,38 +474,63 @@ jobs:
         continue-on-error: false
       
       - name: Create Composer environment (if needed)
-        if: steps.check-composer.outputs.exists != 'true'
+        if: steps.check-composer.outputs.exists != 'true' && steps.check-composer.outputs.creating != 'true'
         run: |
           PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
           REGION="${{ secrets.GCP_REGION || 'us-central1' }}"
           COMPOSER_ENV="chicago-taxi-composer"
           
           echo "🔄 Creando entorno de Cloud Composer..."
-          echo "⚠️  NOTA: Esto puede tardar 20-30 minutos. El workflow continuará después."
-          echo "   Si falla por timeout, el entorno se seguirá creando en background."
+          echo "⚠️  NOTA: Esto puede tardar 20-30 minutos."
+          echo "   El workflow NO esperará a que termine - Composer se creará en background."
           echo "   Puedes verificar el progreso en:"
           echo "   https://console.cloud.google.com/composer/environments?project=$PROJECT_ID"
           echo ""
+          echo "🔒 IMPORTANTE: Si este workflow se ejecuta de nuevo mientras Composer se está creando,"
+          echo "   NO intentará crearlo de nuevo (se detectará que está en estado CREATING)."
+          echo ""
+          
+          # Verificar una vez más antes de crear (por si acaso cambió entre el check y ahora)
+          ENV_CHECK=$(gcloud composer environments describe "$COMPOSER_ENV" \
+            --location "$REGION" \
+            --project "$PROJECT_ID" \
+            --format="value(name)" 2>/dev/null || echo "")
+          
+          if [ -n "$ENV_CHECK" ]; then
+            echo "✅ Composer ya existe (fue creado entre el check y ahora). Saltando creación."
+            exit 0
+          fi
           
           # Intentar crear (puede fallar si ya existe o por permisos)
-          # NOTA: Composer 2.x no acepta --disk-size
+          # NOTA: Composer 2.x no acepta --disk-size ni --python-version
+          # Usamos --async para que no espere (evita timeout del workflow)
           gcloud composer environments create "$COMPOSER_ENV" \
             --location "$REGION" \
             --project "$PROJECT_ID" \
             --image-version composer-2.4.0-airflow-2.5.0 \
             --machine-type n1-standard-2 \
             --node-count 3 \
-            --python-version 3 2>&1 || {
+            --async 2>&1 || {
             EXIT_CODE=$?
-            if [ $EXIT_CODE -eq 1 ]; then
+            ERROR_MSG=$(cat)
+            if echo "$ERROR_MSG" | grep -q "already exists\|Already exists"; then
+              echo "✅ Composer ya existe. Continuando..."
+              exit 0
+            elif [ $EXIT_CODE -eq 1 ]; then
               echo "⚠️  Error creando Composer. Puede que:"
-              echo "   - Ya exista (verificando...)"
+              echo "   - Ya exista"
               echo "   - Falten permisos (necesitas roles/composer.admin)"
               echo "   - La API no esté habilitada"
               echo ""
               echo "   Continuando para intentar obtener el bucket..."
+              exit 0  # No fallar el workflow
+            else
+              echo "⚠️  Error inesperado: $ERROR_MSG"
+              exit 0  # No fallar el workflow
             fi
           }
+          
+          echo "✅ Comando de creación de Composer iniciado (ejecutándose en background)"
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           GCP_REGION: ${{ secrets.GCP_REGION || 'us-central1' }}
