@@ -407,10 +407,33 @@ jobs:
           SA_EMAIL=$(echo '${{ secrets.GCP_SA_KEY }}' | jq -r '.client_email')
           echo "Service Account: $SA_EMAIL"
           
-          gcloud projects add-iam-policy-binding ${{ secrets.GCP_PROJECT_ID }} \
-            --member="serviceAccount:$SA_EMAIL" \
-            --role="roles/bigquery.dataViewer" \
-            --condition=None || echo "⚠️  Permiso ya existe o no se pudo otorgar"
+          # Verificar si ya tiene el permiso
+          if gcloud projects get-iam-policy ${{ secrets.GCP_PROJECT_ID }} \
+            --flatten="bindings[].members" \
+            --filter="bindings.members:serviceAccount:$SA_EMAIL AND bindings.role:roles/bigquery.dataViewer" \
+            --format="value(bindings.role)" | grep -q "roles/bigquery.dataViewer"; then
+            echo "✅ El service account ya tiene el rol bigquery.dataViewer"
+          else
+            echo "🔄 Otorgando rol bigquery.dataViewer..."
+            gcloud projects add-iam-policy-binding ${{ secrets.GCP_PROJECT_ID }} \
+              --member="serviceAccount:$SA_EMAIL" \
+              --role="roles/bigquery.dataViewer" \
+              --condition=None
+            echo "✅ Rol otorgado. Esperando propagación (10 segundos)..."
+            sleep 10
+          fi
+          
+          # Verificar también que tenga bigquery.jobUser (necesario para ejecutar queries)
+          if ! gcloud projects get-iam-policy ${{ secrets.GCP_PROJECT_ID }} \
+            --flatten="bindings[].members" \
+            --filter="bindings.members:serviceAccount:$SA_EMAIL AND bindings.role:roles/bigquery.jobUser" \
+            --format="value(bindings.role)" | grep -q "roles/bigquery.jobUser"; then
+            echo "🔄 Otorgando rol bigquery.jobUser..."
+            gcloud projects add-iam-policy-binding ${{ secrets.GCP_PROJECT_ID }} \
+              --member="serviceAccount:$SA_EMAIL" \
+              --role="roles/bigquery.jobUser" \
+              --condition=None
+          fi
         continue-on-error: true
       
       - name: Setup dbt profiles directory
