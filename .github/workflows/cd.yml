@@ -1042,36 +1042,42 @@ jobs:
           COMPOSER_ENV="chicago-taxi-composer"
           
           echo "🔧 Configurando variables de Airflow..."
+          echo "   NOTA: Cloud Composer no soporta 'variables --set' directamente"
+          echo "   Usando 'airflow variables set' uno por uno (puede tardar ~1 minuto por variable)"
+          echo ""
           
-          # Configurar variables usando gcloud composer
-          # Usar Airflow CLI dentro del entorno de Composer
-          gcloud composer environments run "$COMPOSER_ENV" \
-            --location "$REGION" \
-            variables -- \
-            --set GCP_PROJECT_ID "$PROJECT_ID" \
-            --set GCP_REGION "$REGION" \
-            --set DBT_PROJECT_DIR "/home/airflow/gcs/data/dbt" \
-            --set DBT_PROFILES_DIR "/home/airflow/gcs/data/dbt" \
-            --set DBT_PROFILE "chicago_taxi_analysis" \
-            --set GCP_SA_KEY_PATH "/home/airflow/gcs/data/github-actions-key.json" \
-            --set OPENWEATHER_API_KEY "${{ secrets.OPENWEATHER_API_KEY || '' }}" || {
-            echo "⚠️  Error configurando variables con gcloud, intentando con Airflow CLI..."
-            # Fallback: usar Airflow CLI directamente
+          # Función helper para configurar variable con manejo de errores
+          set_var() {
+            local var_name=$1
+            local var_value=$2
+            echo "   Configurando $var_name..."
             gcloud composer environments run "$COMPOSER_ENV" \
               --location "$REGION" \
               variables -- \
-              set GCP_PROJECT_ID "$PROJECT_ID" || true
-            gcloud composer environments run "$COMPOSER_ENV" \
-              --location "$REGION" \
-              variables -- \
-              set GCP_REGION "$REGION" || true
-            gcloud composer environments run "$COMPOSER_ENV" \
-              --location "$REGION" \
-              variables -- \
-              set GCP_SA_KEY_PATH "/home/airflow/gcs/data/github-actions-key.json" || true
+              set "$var_name" "$var_value" 2>&1 | grep -v "Use ctrl-c to interrupt" || {
+              echo "   ⚠️  Error o variable ya existe: $var_name"
+              return 0  # No fallar si la variable ya existe
+            }
           }
           
-          echo "✅ Variables configuradas"
+          # Configurar variables una por una
+          # NOTA: Cada comando puede tardar ~1 minuto, pero es el método que funciona
+          set_var "GCP_PROJECT_ID" "$PROJECT_ID"
+          set_var "GCP_REGION" "$REGION"
+          set_var "DBT_PROJECT_DIR" "/home/airflow/gcs/data/dbt"
+          set_var "DBT_PROFILES_DIR" "/home/airflow/gcs/data/dbt"
+          set_var "DBT_PROFILE" "chicago_taxi_analysis"
+          set_var "GCP_SA_KEY_PATH" "/home/airflow/gcs/data/github-actions-key.json"
+          
+          if [ -n "${{ secrets.OPENWEATHER_API_KEY || '' }}" ]; then
+            set_var "OPENWEATHER_API_KEY" "${{ secrets.OPENWEATHER_API_KEY }}"
+          else
+            echo "   ⏭️  Saltando OPENWEATHER_API_KEY (no configurado en secrets)"
+          fi
+          
+          echo ""
+          echo "✅ Variables configuradas (puede que algunas ya existieran)"
+          echo "   Verifica en Airflow UI: Admin → Variables"
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           GCP_REGION: ${{ secrets.GCP_REGION || 'us-central1' }}
