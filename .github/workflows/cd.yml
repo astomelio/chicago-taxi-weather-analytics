@@ -507,6 +507,7 @@ jobs:
           # Intentar crear (puede fallar si ya existe o por permisos)
           # NOTA: Composer 2.x no acepta --disk-size ni --python-version
           # Usamos --async para que no espere (evita timeout del workflow)
+          echo "🔄 Ejecutando comando de creación..."
           CREATE_OUTPUT=$(gcloud composer environments create "$COMPOSER_ENV" \
             --location "$REGION" \
             --project "$PROJECT_ID" \
@@ -515,6 +516,15 @@ jobs:
             --node-count 3 \
             --async 2>&1)
           CREATE_EXIT=$?
+          
+          # SIEMPRE mostrar el output para debugging
+          echo ""
+          echo "📋 Output del comando gcloud composer create:"
+          echo "----------------------------------------"
+          echo "$CREATE_OUTPUT"
+          echo "----------------------------------------"
+          echo "Exit code: $CREATE_EXIT"
+          echo ""
           
           if [ $CREATE_EXIT -eq 0 ]; then
             echo "✅ Comando de creación de Composer iniciado (ejecutándose en background)"
