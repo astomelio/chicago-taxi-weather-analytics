@@ -401,40 +401,81 @@ jobs:
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
       
-      - name: Grant BigQuery Public Data Viewer role to GitHub Actions SA
+      - name: Grant BigQuery permissions to GitHub Actions SA
         run: |
-          echo "🔐 Otorgando permisos para acceder a datasets públicos..."
+          echo "🔐 Configurando permisos de BigQuery para el service account..."
           SA_EMAIL=$(echo '${{ secrets.GCP_SA_KEY }}' | jq -r '.client_email')
+          PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          
           echo "Service Account: $SA_EMAIL"
+          echo "Project: $PROJECT_ID"
           
-          # Verificar si ya tiene el permiso
-          if gcloud projects get-iam-policy ${{ secrets.GCP_PROJECT_ID }} \
-            --flatten="bindings[].members" \
-            --filter="bindings.members:serviceAccount:$SA_EMAIL AND bindings.role:roles/bigquery.dataViewer" \
-            --format="value(bindings.role)" | grep -q "roles/bigquery.dataViewer"; then
-            echo "✅ El service account ya tiene el rol bigquery.dataViewer"
-          else
-            echo "🔄 Otorgando rol bigquery.dataViewer..."
-            gcloud projects add-iam-policy-binding ${{ secrets.GCP_PROJECT_ID }} \
-              --member="serviceAccount:$SA_EMAIL" \
-              --role="roles/bigquery.dataViewer" \
-              --condition=None
-            echo "✅ Rol otorgado. Esperando propagación (10 segundos)..."
-            sleep 10
-          fi
+          # Roles necesarios para acceder a datasets públicos y ejecutar queries
+          ROLES=(
+            "roles/bigquery.dataViewer"      # Para leer datasets públicos
+            "roles/bigquery.dataEditor"      # Para escribir en nuestros datasets
+            "roles/bigquery.jobUser"         # Para ejecutar queries
+          )
           
-          # Verificar también que tenga bigquery.jobUser (necesario para ejecutar queries)
-          if ! gcloud projects get-iam-policy ${{ secrets.GCP_PROJECT_ID }} \
-            --flatten="bindings[].members" \
-            --filter="bindings.members:serviceAccount:$SA_EMAIL AND bindings.role:roles/bigquery.jobUser" \
-            --format="value(bindings.role)" | grep -q "roles/bigquery.jobUser"; then
-            echo "🔄 Otorgando rol bigquery.jobUser..."
-            gcloud projects add-iam-policy-binding ${{ secrets.GCP_PROJECT_ID }} \
-              --member="serviceAccount:$SA_EMAIL" \
-              --role="roles/bigquery.jobUser" \
-              --condition=None
-          fi
-        continue-on-error: true
+          for ROLE in "${ROLES[@]}"; do
+            echo ""
+            echo "🔍 Verificando rol: $ROLE"
+            
+            # Verificar si el service account ya tiene el rol
+            if gcloud projects get-iam-policy "$PROJECT_ID" \
+              --flatten="bindings[].members" \
+              --filter="bindings.members:serviceAccount:$SA_EMAIL AND bindings.role:$ROLE" \
+              --format="value(bindings.role)" 2>/dev/null | grep -q "$ROLE"; then
+              echo "  ✅ Ya tiene el rol $ROLE"
+            else
+              echo "  🔄 Otorgando rol $ROLE..."
+              if gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+                --member="serviceAccount:$SA_EMAIL" \
+                --role="$ROLE" \
+                --condition=None 2>&1; then
+                echo "  ✅ Rol $ROLE otorgado exitosamente"
+              else
+                echo "  ⚠️  Error al otorgar $ROLE (puede que ya exista)"
+              fi
+            fi
+          done
+          
+          echo ""
+          echo "⏳ Esperando propagación de permisos (15 segundos)..."
+          sleep 15
+          
+          # Verificar que los permisos estén activos probando una query simple
+          echo ""
+          echo "🧪 Verificando acceso a dataset público..."
+          python3 << 'PYEOF'
+          from google.cloud import bigquery
+          import os
+          import sys
+          
+          project_id = os.environ['GCP_PROJECT_ID']
+          client = bigquery.Client(project=project_id)
+          
+          try:
+              # Query simple al dataset público
+              query = """
+              SELECT COUNT(*) as total
+              FROM `bigquery-public-data.chicago_taxi_trips.taxi_trips`
+              WHERE DATE(trip_start_timestamp) >= '2023-06-01'
+                AND DATE(trip_start_timestamp) <= '2023-12-31'
+              LIMIT 1
+              """
+              result = client.query(query).result()
+              row = next(result)
+              print(f"✅ Acceso verificado: {row.total:,} viajes disponibles")
+              sys.exit(0)
+          except Exception as e:
+              print(f"❌ Error de acceso: {e}")
+              print("⚠️  Los permisos pueden necesitar más tiempo para propagarse")
+              sys.exit(1)
+          PYEOF
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        continue-on-error: false
       
       - name: Setup dbt profiles directory
         run: |
