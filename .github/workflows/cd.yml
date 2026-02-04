@@ -398,6 +398,8 @@ jobs:
           REGION="${{ secrets.GCP_REGION || 'us-central1' }}"
           COMPOSER_ENV="chicago-taxi-composer"
           
+          echo "🔍 Verificando si existe el entorno de Composer..."
+          
           if gcloud composer environments describe "$COMPOSER_ENV" \
             --location "$REGION" \
             --project "$PROJECT_ID" \
@@ -405,22 +407,29 @@ jobs:
             echo "✅ Composer environment existe"
             echo "exists=true" >> $GITHUB_OUTPUT
           else
-            echo "⚠️  Composer environment no existe. Creándolo..."
+            echo "⚠️  Composer environment no existe"
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           GCP_REGION: ${{ secrets.GCP_REGION || 'us-central1' }}
-        continue-on-error: true
+        continue-on-error: false
       
       - name: Create Composer environment (if needed)
-        if: steps.check-composer.outputs.exists == 'false'
+        if: steps.check-composer.outputs.exists != 'true'
         run: |
           PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
           REGION="${{ secrets.GCP_REGION || 'us-central1' }}"
           COMPOSER_ENV="chicago-taxi-composer"
           
-          echo "🔄 Creando entorno de Cloud Composer (esto puede tardar 20-30 minutos)..."
+          echo "🔄 Creando entorno de Cloud Composer..."
+          echo "⚠️  NOTA: Esto puede tardar 20-30 minutos. El workflow continuará después."
+          echo "   Si falla por timeout, el entorno se seguirá creando en background."
+          echo "   Puedes verificar el progreso en:"
+          echo "   https://console.cloud.google.com/composer/environments?project=$PROJECT_ID"
+          echo ""
+          
+          # Intentar crear (puede fallar si ya existe o por permisos)
           gcloud composer environments create "$COMPOSER_ENV" \
             --location "$REGION" \
             --project "$PROJECT_ID" \
@@ -428,42 +437,71 @@ jobs:
             --machine-type n1-standard-2 \
             --node-count 3 \
             --disk-size 30GB \
-            --python-version 3 || echo "⚠️  Error creando Composer (puede que ya exista o falten permisos)"
+            --python-version 3 2>&1 || {
+            EXIT_CODE=$?
+            if [ $EXIT_CODE -eq 1 ]; then
+              echo "⚠️  Error creando Composer. Puede que:"
+              echo "   - Ya exista (verificando...)"
+              echo "   - Falten permisos (necesitas roles/composer.admin)"
+              echo "   - La API no esté habilitada"
+              echo ""
+              echo "   Continuando para intentar obtener el bucket..."
+            fi
+          }
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           GCP_REGION: ${{ secrets.GCP_REGION || 'us-central1' }}
         continue-on-error: true
       
-      - name: Get Composer bucket
+      - name: Get Composer bucket (with retries)
         id: get-bucket
         run: |
           PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
           REGION="${{ secrets.GCP_REGION || 'us-central1' }}"
           COMPOSER_ENV="chicago-taxi-composer"
           
-          # Esperar un poco si se acaba de crear
-          sleep 30
+          echo "🔍 Obteniendo bucket de Composer (con reintentos)..."
           
-          BUCKET=$(gcloud composer environments describe "$COMPOSER_ENV" \
-            --location "$REGION" \
-            --project "$PROJECT_ID" \
-            --format="value(config.dagGcsPrefix)" 2>/dev/null | sed 's|/dags||' || echo "")
+          # Intentar hasta 6 veces (3 minutos total)
+          for i in {1..6}; do
+            echo "   Intento $i/6..."
+            
+            BUCKET=$(gcloud composer environments describe "$COMPOSER_ENV" \
+              --location "$REGION" \
+              --project "$PROJECT_ID" \
+              --format="value(config.dagGcsPrefix)" 2>/dev/null | sed 's|/dags||' || echo "")
+            
+            if [ -n "$BUCKET" ]; then
+              echo "✅ Bucket encontrado: $BUCKET"
+              echo "bucket=$BUCKET" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            
+            if [ $i -lt 6 ]; then
+              echo "   Esperando 30 segundos antes del siguiente intento..."
+              sleep 30
+            fi
+          done
           
-          if [ -z "$BUCKET" ]; then
-            echo "❌ No se pudo obtener el bucket de Composer"
-            echo "   El entorno puede estar aún creándose. Espera 20-30 minutos y ejecuta manualmente:"
-            echo "   ./scripts/setup_airflow.sh"
-            exit 1
-          fi
-          
-          echo "✅ Bucket encontrado: $BUCKET"
-          echo "bucket=$BUCKET" >> $GITHUB_OUTPUT
+          echo "❌ No se pudo obtener el bucket de Composer después de 6 intentos"
+          echo "   El entorno puede estar aún creándose (tarda 20-30 minutos)"
+          echo ""
+          echo "📋 Próximos pasos:"
+          echo "1. Espera 20-30 minutos"
+          echo "2. Verifica el estado en:"
+          echo "   https://console.cloud.google.com/composer/environments?project=$PROJECT_ID"
+          echo "3. Cuando esté listo, ejecuta manualmente:"
+          echo "   ./scripts/setup_airflow.sh"
+          echo ""
+          echo "⚠️  Continuando sin subir DAGs (se pueden subir después manualmente)"
+          echo "bucket=" >> $GITHUB_OUTPUT
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           GCP_REGION: ${{ secrets.GCP_REGION || 'us-central1' }}
-        continue-on-error: false
+        continue-on-error: true
       
       - name: Upload DAGs to Composer
+        if: steps.get-bucket.outputs.bucket != ''
         run: |
           BUCKET="${{ steps.get-bucket.outputs.bucket }}"
           echo "📤 Subiendo DAGs a Composer..."
@@ -472,6 +510,7 @@ jobs:
         continue-on-error: true
       
       - name: Upload dbt to Composer
+        if: steps.get-bucket.outputs.bucket != ''
         run: |
           BUCKET="${{ steps.get-bucket.outputs.bucket }}"
           echo "📤 Subiendo dbt a Composer..."
@@ -480,6 +519,7 @@ jobs:
         continue-on-error: true
       
       - name: Upload service account key to Composer
+        if: steps.get-bucket.outputs.bucket != ''
         run: |
           BUCKET="${{ steps.get-bucket.outputs.bucket }}"
           if [ -f "github-actions-key.json" ]; then
@@ -490,6 +530,13 @@ jobs:
             echo "⚠️  github-actions-key.json no encontrado. Usando credenciales por defecto."
           fi
         continue-on-error: true
+      
+      - name: Skip uploads (Composer not ready)
+        if: steps.get-bucket.outputs.bucket == ''
+        run: |
+          echo "⏭️  Saltando subida de archivos - Composer aún no está listo"
+          echo "   Ejecuta manualmente cuando Composer esté listo:"
+          echo "   ./scripts/setup_airflow.sh"
       
       - name: Set Airflow variables
         run: |
