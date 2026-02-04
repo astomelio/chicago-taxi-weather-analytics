@@ -152,33 +152,82 @@ def activate_public_dataset_access(**context):
     from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
     from google.cloud import bigquery
     
-    # DIAGNÓSTICO: Verificar identidad
+    # DIAGNÓSTICO: Verificar identidad REAL
     import google.auth
+    import json
+    import os
+    
+    print(f"🔍 DIAGNÓSTICO COMPLETO DE IDENTIDAD:")
+    print(f"   GOOGLE_APPLICATION_CREDENTIALS: {os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', 'NO CONFIGURADO')}")
+    
     try:
         credentials, project = google.auth.default()
+        print(f"   Tipo de credenciales: {type(credentials).__name__}")
+        print(f"   Proyecto: {project}")
+        
+        # Intentar obtener el email del service account de diferentes formas
+        identity = None
         if hasattr(credentials, 'service_account_email'):
             identity = credentials.service_account_email
         elif hasattr(credentials, 'client_email'):
             identity = credentials.client_email
+        elif hasattr(credentials, '_service_account_email'):
+            identity = credentials._service_account_email
+        elif hasattr(credentials, 'signer') and hasattr(credentials.signer, 'service_account_email'):
+            identity = credentials.signer.service_account_email
+        
+        if identity:
+            print(f"   ✅ Service Account Email: {identity}")
         else:
-            identity = str(type(credentials))
-        print(f"🔍 [activate_access] Identidad: {identity}")
-        print(f"   Proyecto: {project}")
+            print(f"   ⚠️  No se pudo obtener email del service account")
+            print(f"   Credenciales: {str(credentials)[:200]}")
+            
+            # Intentar obtener desde el objeto completo
+            try:
+                creds_dict = credentials.__dict__
+                for key, value in creds_dict.items():
+                    if 'email' in key.lower() or 'client_email' in key.lower():
+                        print(f"   Posible email en {key}: {value}")
+            except:
+                pass
     except Exception as e:
-        print(f"⚠️  [activate_access] Error obteniendo identidad: {e}")
+        print(f"   ❌ Error obteniendo identidad: {e}")
+        import traceback
+        print(f"   Traceback: {traceback.format_exc()}")
     
     hook = BigQueryHook(project_id=PROJECT_ID, location=REGION)
     client = hook.get_client()
     
-    # Verificar identidad del cliente
+    # Verificar identidad del cliente BigQuery
+    print(f"")
+    print(f"🔍 DIAGNÓSTICO CLIENTE BIGQUERY:")
     try:
         bq_creds = client._credentials
+        print(f"   Tipo: {type(bq_creds).__name__}")
+        
+        bq_identity = None
         if hasattr(bq_creds, 'service_account_email'):
-            print(f"🔍 [activate_access] Cliente BigQuery usa: {bq_creds.service_account_email}")
+            bq_identity = bq_creds.service_account_email
         elif hasattr(bq_creds, 'client_email'):
-            print(f"🔍 [activate_access] Cliente BigQuery usa: {bq_creds.client_email}")
+            bq_identity = bq_creds.client_email
+        elif hasattr(bq_creds, '_service_account_email'):
+            bq_identity = bq_creds._service_account_email
+        
+        if bq_identity:
+            print(f"   ✅ Service Account Email: {bq_identity}")
+        else:
+            print(f"   ⚠️  No se pudo obtener email del service account del cliente")
+            try:
+                creds_dict = bq_creds.__dict__
+                for key, value in creds_dict.items():
+                    if 'email' in key.lower() or 'client_email' in key.lower():
+                        print(f"   Posible email en {key}: {value}")
+            except:
+                pass
     except Exception as e:
-        print(f"⚠️  [activate_access] Error verificando credenciales del cliente: {e}")
+        print(f"   ❌ Error verificando credenciales del cliente: {e}")
+    
+    print(f"")
     
     # Query muy simple solo para activar el acceso
     activation_query = """
