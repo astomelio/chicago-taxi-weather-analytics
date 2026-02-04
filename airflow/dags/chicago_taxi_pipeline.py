@@ -214,11 +214,35 @@ def load_historical_taxi_data(**context):
             identity = str(type(credentials))
         print(f"🔍 Identidad que está usando Airflow: {identity}")
         print(f"   Proyecto: {project}")
+        print(f"   Tipo de credenciales: {type(credentials).__name__}")
+        
+        # Verificar si es el service account correcto
+        expected_sa = "github-actions-sa@brave-computer-454217-q4.iam.gserviceaccount.com"
+        if identity == expected_sa:
+            print(f"   ✅ Usando el service account correcto")
+        else:
+            print(f"   ⚠️  Service account diferente al esperado")
+            print(f"   Esperado: {expected_sa}")
     except Exception as e:
         print(f"⚠️  No se pudo determinar la identidad: {e}")
+        import traceback
+        print(f"   Traceback: {traceback.format_exc()}")
     
     hook = BigQueryHook(project_id=PROJECT_ID, location=REGION)
     client = hook.get_client()
+    
+    # DIAGNÓSTICO ADICIONAL: Verificar identidad del cliente de BigQuery
+    try:
+        bq_credentials = client._credentials
+        if hasattr(bq_credentials, 'service_account_email'):
+            bq_identity = bq_credentials.service_account_email
+        elif hasattr(bq_credentials, 'client_email'):
+            bq_identity = bq_credentials.client_email
+        else:
+            bq_identity = str(type(bq_credentials))
+        print(f"🔍 Identidad del cliente BigQuery: {bq_identity}")
+    except Exception as e:
+        print(f"⚠️  No se pudo determinar identidad del cliente BigQuery: {e}")
     
     # Verificar si la tabla ya existe y tiene datos
     dataset_ref = client.dataset('chicago_taxi_raw', project=PROJECT_ID)
