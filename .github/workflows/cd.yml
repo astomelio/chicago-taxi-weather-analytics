@@ -563,40 +563,6 @@ jobs:
       - name: Run dbt models
         run: |
           dbt deps --profiles-dir ~/.dbt
-          echo "🔄 Verificando si taxi_trips_silver existe..."
-          python3 << 'PYEOF'
-          from google.cloud import bigquery
-          import os
-          import sys
-          
-          PROJECT_ID = os.environ['GCP_PROJECT_ID']
-          client = bigquery.Client(project=PROJECT_ID)
-          
-          table_id = f"{PROJECT_ID}.chicago_taxi_silver.taxi_trips_silver"
-          
-          try:
-              table = client.get_table(table_id)
-              print(f"✅ Tabla taxi_trips_silver existe: {table.num_rows:,} filas")
-              sys.exit(0)
-          except Exception as e:
-              if "Not found" in str(e) or "404" in str(e):
-                  print("❌ ERROR: La tabla taxi_trips_silver NO existe")
-                  print("")
-                  print("📋 ACCIÓN REQUERIDA:")
-                  print("   El service account no puede crear tablas desde datasets públicos.")
-                  print("   Necesitas crear la tabla MANUALMENTE UNA VEZ:")
-                  print("")
-                  print("   1. Ve a: https://console.cloud.google.com/bigquery?project=" + PROJECT_ID)
-                  print("   2. Ejecuta el script: scripts/create_taxi_trips_silver.sql")
-                  print("   3. Después de crear la tabla, re-ejecuta este workflow")
-                  print("")
-                  print("   Una vez creada, el workflow funcionará automáticamente.")
-                  sys.exit(1)
-              else:
-                  print(f"❌ Error verificando tabla: {e}")
-                  sys.exit(1)
-          PYEOF
-          
           echo "🔄 Ejecutando modelos silver..."
           dbt run --models silver --profiles-dir ~/.dbt
           echo "🔄 Ejecutando modelos gold..."

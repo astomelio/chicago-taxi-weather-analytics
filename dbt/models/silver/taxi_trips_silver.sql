@@ -13,13 +13,11 @@
 
 WITH raw_trips AS (
   SELECT *
-  FROM `bigquery-public-data.chicago_taxi_trips.taxi_trips`
+  FROM `{{ var('project_id') }}.chicago_taxi_raw.taxi_trips_raw`
   WHERE trip_start_timestamp IS NOT NULL
     AND trip_seconds IS NOT NULL
     AND trip_seconds > 0
     AND trip_miles >= 0
-    AND DATE(trip_start_timestamp) >= '2023-06-01'
-    AND DATE(trip_start_timestamp) <= '2023-12-31'
 ),
 
 -- Eliminar duplicados basándose en unique_key
