@@ -55,45 +55,41 @@ Este proyecto analiza la relación entre las condiciones climáticas y la duraci
 └── README.md
 ```
 
-## 🚀 Inicio Rápido
+## 🚀 Inicio Rápido - Todo Automático
 
-### Opción Recomendada: Airflow (Cloud Composer)
+**GitHub Actions hace TODO automáticamente:**
 
-**Para orquestar el pipeline con Airflow (recomendado para pipelines de datos):**
+1. **Configurar Secrets en GitHub**:
+   - Ve a: `Settings > Secrets and variables > Actions`
+   - Agrega: `GCP_SA_KEY`, `GCP_PROJECT_ID`, `DEVELOPER_EMAIL`
+   - (Opcional): `OPENWEATHER_API_KEY`, `GCP_REGION`
 
-1. **Desplegar infraestructura con Terraform**:
+2. **Hacer push a main**:
    ```bash
-   cd terraform
-   terraform init
-   terraform apply
+   git push origin main
    ```
 
-2. **Crear entorno de Cloud Composer** (si no existe):
-   ```bash
-   gcloud composer environments create chicago-taxi-composer \
-     --location us-central1 \
-     --image-version composer-2.4.0-airflow-2.5.0
-   ```
+3. **GitHub Actions automáticamente**:
+   - ✅ Despliega infraestructura con Terraform (BigQuery, Cloud Functions, etc.)
+   - ✅ Crea entorno de Cloud Composer (si no existe)
+   - ✅ Sube DAGs de Airflow
+   - ✅ Sube código dbt
+   - ✅ Configura variables de Airflow
+   - ✅ **TODO queda listo para usar**
 
-3. **Configurar Airflow**:
-   ```bash
-   ./scripts/setup_airflow.sh
-   ```
-
-4. **En Airflow UI, trigger el DAG `chicago_taxi_historical_ingestion`** (una vez)
+4. **Último paso manual (una vez)**:
+   - Ve a Airflow UI (el link aparece en los logs de GitHub Actions)
+   - Trigger el DAG `chicago_taxi_historical_ingestion`
+   - El pipeline diario se ejecutará automáticamente después
 
 📖 **Guía completa de Airflow**: Ver [airflow/README.md](airflow/README.md)
 
-### Opción Alternativa: GitHub Actions
+### ¿Quién hace qué?
 
-**Para desplegar con GitHub Actions (solo infraestructura):**
-
-1. **Clonar el repositorio**
-2. **Configurar Secrets en GitHub**
-3. **Hacer push a main**
-4. **GitHub Actions despliega la infraestructura**
-
-⚠️ **Nota**: GitHub Actions no puede ejecutar dbt contra datasets públicos de BigQuery debido a limitaciones de permisos. Usa Airflow para el pipeline de datos.
+- **Terraform (via GitHub Actions)**: Crea infraestructura (BigQuery, Cloud Functions, Cloud Scheduler)
+- **GitHub Actions**: Configura Airflow automáticamente (crea Composer, sube DAGs, configura variables)
+- **Airflow**: Ejecuta el pipeline de datos (ingesta, transformaciones dbt)
+- **Tú**: Solo necesitas trigger el DAG histórico una vez
 
 ---
 
