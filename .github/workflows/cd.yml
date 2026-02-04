@@ -563,6 +563,72 @@ jobs:
       - name: Run dbt models
         run: |
           dbt deps --profiles-dir ~/.dbt
+          echo "🔄 Verificando/creando vista taxi_trips_raw..."
+          python3 << 'PYEOF'
+          from google.cloud import bigquery
+          import os
+          
+          PROJECT_ID = os.environ['GCP_PROJECT_ID']
+          client = bigquery.Client(project=PROJECT_ID)
+          
+          view_id = f"{PROJECT_ID}.chicago_taxi_raw.taxi_trips_raw"
+          
+          # Verificar si existe
+          try:
+              view = client.get_table(view_id)
+              print(f"✅ Vista taxi_trips_raw existe")
+          except Exception as e:
+              if "Not found" in str(e) or "404" in str(e):
+                  print("⚠️  Vista no existe. Intentando crearla...")
+                  
+                  # Crear la vista
+                  view_query = """
+                  CREATE OR REPLACE VIEW `{}.chicago_taxi_raw.taxi_trips_raw` AS
+                  SELECT 
+                    unique_key,
+                    taxi_id,
+                    trip_start_timestamp,
+                    trip_end_timestamp,
+                    trip_seconds,
+                    trip_miles,
+                    pickup_census_tract,
+                    dropoff_census_tract,
+                    pickup_community_area,
+                    dropoff_community_area,
+                    fare,
+                    tips,
+                    tolls,
+                    extras,
+                    trip_total,
+                    payment_type,
+                    company,
+                    pickup_latitude,
+                    pickup_longitude,
+                    dropoff_latitude,
+                    dropoff_longitude
+                  FROM `bigquery-public-data.chicago_taxi_trips.taxi_trips`
+                  WHERE DATE(trip_start_timestamp) >= '2023-06-01'
+                    AND DATE(trip_start_timestamp) <= '2023-12-31'
+                  """.format(PROJECT_ID)
+                  
+                  try:
+                      job = client.query(view_query)
+                      job.result(timeout=60)
+                      print(f"✅ Vista creada exitosamente")
+                  except Exception as create_error:
+                      error_msg = str(create_error)
+                      if "Access Denied" in error_msg or "403" in error_msg:
+                          print(f"❌ No se puede crear la vista: {create_error}")
+                          print("⚠️  El proyecto necesita estar autorizado para usar datasets públicos")
+                          print("   Ejecuta: python3 scripts/authorize_public_dataset.py")
+                          # No fallar - dbt intentará usar el dataset público directamente
+                      else:
+                          print(f"⚠️  Error creando vista: {create_error}")
+                          # Continuar - dbt intentará usar el dataset público directamente
+              else:
+                  print(f"⚠️  Error verificando vista: {e}")
+          PYEOF
+          
           echo "🔄 Ejecutando modelos silver..."
           dbt run --models silver --profiles-dir ~/.dbt
           echo "🔄 Ejecutando modelos gold..."
