@@ -152,8 +152,33 @@ def activate_public_dataset_access(**context):
     from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
     from google.cloud import bigquery
     
+    # DIAGNÓSTICO: Verificar identidad
+    import google.auth
+    try:
+        credentials, project = google.auth.default()
+        if hasattr(credentials, 'service_account_email'):
+            identity = credentials.service_account_email
+        elif hasattr(credentials, 'client_email'):
+            identity = credentials.client_email
+        else:
+            identity = str(type(credentials))
+        print(f"🔍 [activate_access] Identidad: {identity}")
+        print(f"   Proyecto: {project}")
+    except Exception as e:
+        print(f"⚠️  [activate_access] Error obteniendo identidad: {e}")
+    
     hook = BigQueryHook(project_id=PROJECT_ID, location=REGION)
     client = hook.get_client()
+    
+    # Verificar identidad del cliente
+    try:
+        bq_creds = client._credentials
+        if hasattr(bq_creds, 'service_account_email'):
+            print(f"🔍 [activate_access] Cliente BigQuery usa: {bq_creds.service_account_email}")
+        elif hasattr(bq_creds, 'client_email'):
+            print(f"🔍 [activate_access] Cliente BigQuery usa: {bq_creds.client_email}")
+    except Exception as e:
+        print(f"⚠️  [activate_access] Error verificando credenciales del cliente: {e}")
     
     # Query muy simple solo para activar el acceso
     activation_query = """
