@@ -41,25 +41,59 @@ Este proyecto analiza la relación entre las condiciones climáticas y la duraci
 │   ├── models/
 │   ├── profiles.yml
 │   └── dbt_project.yml
+├── airflow/                # Orquestación con Airflow (RECOMENDADO)
+│   └── dags/
+│       ├── chicago_taxi_pipeline.py
+│       └── requirements.txt
 ├── functions/              # Cloud Functions
 │   └── weather_ingestion/
 ├── scripts/               # Scripts auxiliares
-│   └── setup.sh
-├── .github/               # CI/CD
+│   ├── setup_airflow.sh
+│   └── verify_tables.py
+├── .github/               # CI/CD (solo para infraestructura)
 │   └── workflows/
 └── README.md
 ```
 
-## 🚀 Inicio Rápido - Despliegue Automático
+## 🚀 Inicio Rápido
 
-**Para desplegar TODO automáticamente en tu cuenta de Google Cloud:**
+### Opción Recomendada: Airflow (Cloud Composer)
+
+**Para orquestar el pipeline con Airflow (recomendado para pipelines de datos):**
+
+1. **Desplegar infraestructura con Terraform**:
+   ```bash
+   cd terraform
+   terraform init
+   terraform apply
+   ```
+
+2. **Crear entorno de Cloud Composer** (si no existe):
+   ```bash
+   gcloud composer environments create chicago-taxi-composer \
+     --location us-central1 \
+     --image-version composer-2.4.0-airflow-2.5.0
+   ```
+
+3. **Configurar Airflow**:
+   ```bash
+   ./scripts/setup_airflow.sh
+   ```
+
+4. **En Airflow UI, trigger el DAG `chicago_taxi_historical_ingestion`** (una vez)
+
+📖 **Guía completa de Airflow**: Ver [airflow/README.md](airflow/README.md)
+
+### Opción Alternativa: GitHub Actions
+
+**Para desplegar con GitHub Actions (solo infraestructura):**
 
 1. **Clonar el repositorio**
-2. **Configurar Secrets en GitHub** (ver [SETUP.md](SETUP.md))
+2. **Configurar Secrets en GitHub**
 3. **Hacer push a main**
-4. **GitHub Actions despliega TODO automáticamente**
+4. **GitHub Actions despliega la infraestructura**
 
-📖 **Guía completa**: Ver [SETUP.md](SETUP.md)
+⚠️ **Nota**: GitHub Actions no puede ejecutar dbt contra datasets públicos de BigQuery debido a limitaciones de permisos. Usa Airflow para el pipeline de datos.
 
 ---
 
@@ -71,7 +105,11 @@ Este proyecto analiza la relación entre las condiciones climáticas y la duraci
 
 ## Configuración Inicial
 
-### Opción 1: Despliegue Automático con GitHub Actions (Recomendado)
+### Opción 1: Pipeline con Airflow (Recomendado para Datos)
+
+Ver [airflow/README.md](airflow/README.md) para instrucciones completas.
+
+### Opción 2: Despliegue de Infraestructura con GitHub Actions
 
 **Pasos:**
 
