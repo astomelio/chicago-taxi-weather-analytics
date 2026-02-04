@@ -513,7 +513,7 @@ jobs:
               dev:
                 type: bigquery
                 method: service-account
-                keyfile: "$GOOGLE_APPLICATION_CREDENTIALS"
+                keyfile: "{{ env_var('GOOGLE_APPLICATION_CREDENTIALS') }}"
                 project: "{{ env_var('GCP_PROJECT_ID') }}"
                 dataset: "{{ env_var('DBT_DATASET', 'chicago_taxi_silver') }}"
                 location: us-central1
