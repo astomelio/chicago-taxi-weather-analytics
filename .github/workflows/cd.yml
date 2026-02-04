@@ -556,14 +556,30 @@ jobs:
           echo ""
           
           # Roles necesarios para BigQuery (datasets públicos + crear tablas)
-          # BigQuery User = incluye Data Viewer + Job User + Data Editor básico
-          for ROLE in "roles/bigquery.user" "roles/bigquery.dataViewer" "roles/bigquery.dataEditor" "roles/bigquery.jobUser"; do
+          # IMPORTANTE: roles/bigquery.user es el más importante - incluye los otros básicos
+          # Pero también necesitamos roles explícitos para asegurar acceso completo
+          ROLES=(
+            "roles/bigquery.user"           # Rol principal - incluye acceso básico
+            "roles/bigquery.dataViewer"     # Ver datasets públicos
+            "roles/bigquery.dataEditor"     # Crear y modificar tablas
+            "roles/bigquery.jobUser"        # Ejecutar queries
+          )
+          
+          for ROLE in "${ROLES[@]}"; do
             echo "   Otorgando rol $ROLE a $COMPOSER_SA"
+            # Usar --condition=None para evitar problemas con condiciones
             gcloud projects add-iam-policy-binding "$PROJECT_ID" \
               --member="serviceAccount:$COMPOSER_SA" \
               --role="$ROLE" \
-              --condition=None 2>&1 || echo "⚠️  Error otorgando $ROLE (puede que ya exista)"
+              --condition=None 2>&1 | grep -v "Updated IAM policy" || echo "   ✅ Rol otorgado (o ya existía)"
           done
+          
+          echo ""
+          echo "📋 Verificando permisos otorgados..."
+          gcloud projects get-iam-policy "$PROJECT_ID" \
+            --flatten="bindings[].members" \
+            --filter="bindings.members:serviceAccount:$COMPOSER_SA" \
+            --format="table(bindings.role)" | grep -i bigquery || echo "   ⚠️  No se encontraron roles BigQuery (puede que aún no hayan propagado)"
           
           echo ""
           echo "✅ Permisos de BigQuery otorgados al service account de Composer"
