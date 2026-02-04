@@ -483,6 +483,9 @@ jobs:
           REGION="${{ secrets.GCP_REGION || 'us-central1' }}"
           COMPOSER_ENV="chicago-taxi-composer"
           
+          # Obtener el email del service account de GitHub Actions
+          SA_EMAIL=$(echo '${{ secrets.GCP_SA_KEY }}' | jq -r '.client_email')
+          
           echo "🔄 Creando entorno de Cloud Composer..."
           echo "⚠️  NOTA: Esto puede tardar 20-30 minutos."
           echo "   El workflow NO esperará a que termine - Composer se creará en background."
@@ -492,6 +495,7 @@ jobs:
           echo "🔒 IMPORTANTE: Si este workflow se ejecuta de nuevo mientras Composer se está creando,"
           echo "   NO intentará crearlo de nuevo (se detectará que está en estado CREATING)."
           echo ""
+          echo "📋 Service Account para Composer: $SA_EMAIL"
           
           # Verificar una vez más antes de crear (por si acaso cambió entre el check y ahora)
           ENV_CHECK=$(gcloud composer environments describe "$COMPOSER_ENV" \
@@ -507,19 +511,20 @@ jobs:
           fi
           
           # Intentar crear (puede fallar si ya existe o por permisos)
-          # NOTA: Composer 2.x no acepta --disk-size ni --python-version
+          # NOTA: Composer 2.x requiere --service-account explícito
+          # NOTA: Composer 2.x no acepta --machine-type, --disk-size, --python-version, ni --node-count
           # Usamos --async para que no espere (evita timeout del workflow)
           echo "🔄 Ejecutando comando de creación..."
           
           # Ejecutar el comando y capturar output y exit code
           # Usar temporal file para asegurar que capturamos todo el output
-          # NOTA: Composer 2.x no acepta --machine-type, --disk-size, --python-version, ni --node-count
           TEMP_OUTPUT=$(mktemp)
           set +e  # Desactivar error estricto temporalmente
           gcloud composer environments create "$COMPOSER_ENV" \
             --location "$REGION" \
             --project "$PROJECT_ID" \
             --image-version composer-2.16.3-airflow-2.10.5 \
+            --service-account "$SA_EMAIL" \
             --async > "$TEMP_OUTPUT" 2>&1
           CREATE_EXIT=$?
           CREATE_OUTPUT=$(cat "$TEMP_OUTPUT")
