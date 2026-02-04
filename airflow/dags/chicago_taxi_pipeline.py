@@ -4,7 +4,6 @@ Orquesta la ingesta de datos, transformaciones dbt y actualizaciones diarias.
 """
 from datetime import datetime, timedelta
 from airflow import DAG
-from airflow.providers.google.cloud.operators.bigquery import BigQueryInsertJobOperator
 from airflow.providers.google.cloud.operators.bigquery import BigQueryCheckOperator
 from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
