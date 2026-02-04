@@ -474,6 +474,7 @@ jobs:
         continue-on-error: false
       
       - name: Create Composer environment (if needed)
+        id: create-composer
         if: steps.check-composer.outputs.exists != 'true' && steps.check-composer.outputs.creating != 'true'
         run: |
           PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
@@ -498,43 +499,66 @@ jobs:
           
           if [ -n "$ENV_CHECK" ]; then
             echo "✅ Composer ya existe (fue creado entre el check y ahora). Saltando creación."
+            echo "created=false" >> $GITHUB_OUTPUT
+            echo "status=exists" >> $GITHUB_OUTPUT
             exit 0
           fi
           
           # Intentar crear (puede fallar si ya existe o por permisos)
           # NOTA: Composer 2.x no acepta --disk-size ni --python-version
           # Usamos --async para que no espere (evita timeout del workflow)
-          gcloud composer environments create "$COMPOSER_ENV" \
+          CREATE_OUTPUT=$(gcloud composer environments create "$COMPOSER_ENV" \
             --location "$REGION" \
             --project "$PROJECT_ID" \
             --image-version composer-2.4.0-airflow-2.5.0 \
             --machine-type n1-standard-2 \
             --node-count 3 \
-            --async 2>&1 || {
-            EXIT_CODE=$?
-            ERROR_MSG=$(cat)
-            if echo "$ERROR_MSG" | grep -q "already exists\|Already exists"; then
-              echo "✅ Composer ya existe. Continuando..."
-              exit 0
-            elif [ $EXIT_CODE -eq 1 ]; then
-              echo "⚠️  Error creando Composer. Puede que:"
-              echo "   - Ya exista"
-              echo "   - Falten permisos (necesitas roles/composer.admin)"
-              echo "   - La API no esté habilitada"
-              echo ""
-              echo "   Continuando para intentar obtener el bucket..."
-              exit 0  # No fallar el workflow
-            else
-              echo "⚠️  Error inesperado: $ERROR_MSG"
-              exit 0  # No fallar el workflow
-            fi
-          }
+            --async 2>&1)
+          CREATE_EXIT=$?
           
-          echo "✅ Comando de creación de Composer iniciado (ejecutándose en background)"
+          if [ $CREATE_EXIT -eq 0 ]; then
+            echo "✅ Comando de creación de Composer iniciado (ejecutándose en background)"
+            echo "created=true" >> $GITHUB_OUTPUT
+            echo "status=creating" >> $GITHUB_OUTPUT
+          else
+            # Analizar el error
+            if echo "$CREATE_OUTPUT" | grep -qi "already exists\|Already exists"; then
+              echo "✅ Composer ya existe. Continuando..."
+              echo "created=false" >> $GITHUB_OUTPUT
+              echo "status=exists" >> $GITHUB_OUTPUT
+            else
+              echo ""
+              echo "=========================================="
+              echo "❌ ERROR CRÍTICO: No se pudo crear Composer"
+              echo "=========================================="
+              echo ""
+              echo "Detalles del error:"
+              echo "$CREATE_OUTPUT"
+              echo ""
+              echo "Posibles causas:"
+              echo "  1. Falta el rol roles/composer.admin en el service account"
+              echo "  2. La API composer.googleapis.com no está habilitada"
+              echo "  3. Cuota insuficiente en el proyecto"
+              echo "  4. Error de permisos o configuración"
+              echo ""
+              echo "🔍 Verifica en la consola:"
+              echo "   https://console.cloud.google.com/composer/environments?project=$PROJECT_ID"
+              echo ""
+              echo "🔧 Solución:"
+              echo "   1. Verifica los permisos del service account"
+              echo "   2. Habilita la API: gcloud services enable composer.googleapis.com"
+              echo "   3. Revisa las cuotas del proyecto"
+              echo ""
+              echo "=========================================="
+              echo "created=false" >> $GITHUB_OUTPUT
+              echo "status=error" >> $GITHUB_OUTPUT
+              exit 1  # FALLAR el workflow para que se notifique
+            fi
+          fi
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           GCP_REGION: ${{ secrets.GCP_REGION || 'us-central1' }}
-        continue-on-error: true
+        continue-on-error: false
       
       - name: Get Composer bucket (with retries)
         id: get-bucket
@@ -543,11 +567,60 @@ jobs:
           REGION="${{ secrets.GCP_REGION || 'us-central1' }}"
           COMPOSER_ENV="chicago-taxi-composer"
           
+          # Si hubo error al crear, verificar el estado antes de intentar obtener el bucket
+          if [ "${{ steps.create-composer.outputs.status }}" == "error" ]; then
+            echo ""
+            echo "=========================================="
+            echo "❌ ERROR: Composer no se pudo crear"
+            echo "=========================================="
+            echo ""
+            echo "El workflow fallará para notificar el error."
+            echo "Verifica los logs del step anterior para más detalles."
+            echo ""
+            exit 1
+          fi
+          
           echo "🔍 Obteniendo bucket de Composer (con reintentos)..."
+          
+          # Si se acaba de crear, esperar un poco antes de intentar obtener el bucket
+          if [ "${{ steps.create-composer.outputs.status }}" == "creating" ]; then
+            echo "⏳ Composer se está creando. Esperando 60 segundos antes de intentar obtener el bucket..."
+            sleep 60
+          fi
           
           # Intentar hasta 6 veces (3 minutos total)
           for i in {1..6}; do
             echo "   Intento $i/6..."
+            
+            # Verificar el estado de Composer
+            ENV_STATE=$(gcloud composer environments describe "$COMPOSER_ENV" \
+              --location "$REGION" \
+              --project "$PROJECT_ID" \
+              --format="value(state)" 2>/dev/null || echo "NOT_FOUND")
+            
+            if [ "$ENV_STATE" == "NOT_FOUND" ]; then
+              echo "   ⚠️  Composer no encontrado. Puede estar aún creándose o hubo un error."
+            elif [ "$ENV_STATE" == "CREATING" ] || [ "$ENV_STATE" == "UPDATING" ]; then
+              echo "   ⏳ Composer está en estado: $ENV_STATE (aún no está listo)"
+            elif [ "$ENV_STATE" == "RUNNING" ]; then
+              echo "   ✅ Composer está RUNNING. Obteniendo bucket..."
+            elif [ "$ENV_STATE" == "ERROR" ] || [ "$ENV_STATE" == "FAILED" ]; then
+              echo ""
+              echo "=========================================="
+              echo "❌ ERROR: Composer falló al crearse"
+              echo "=========================================="
+              echo ""
+              echo "Estado: $ENV_STATE"
+              echo ""
+              echo "🔍 Verifica en la consola:"
+              echo "   https://console.cloud.google.com/composer/environments?project=$PROJECT_ID"
+              echo ""
+              echo "El workflow fallará para notificar el error."
+              echo ""
+              exit 1
+            else
+              echo "   ℹ️  Estado de Composer: $ENV_STATE"
+            fi
             
             BUCKET=$(gcloud composer environments describe "$COMPOSER_ENV" \
               --location "$REGION" \
@@ -566,13 +639,22 @@ jobs:
             fi
           done
           
-          echo "❌ No se pudo obtener el bucket de Composer después de 6 intentos"
-          echo "   El entorno puede estar aún creándose (tarda 20-30 minutos)"
+          echo ""
+          echo "=========================================="
+          echo "⚠️  ADVERTENCIA: No se pudo obtener el bucket de Composer"
+          echo "=========================================="
+          echo ""
+          echo "Esto puede significar:"
+          echo "  1. Composer aún se está creando (tarda 20-30 minutos)"
+          echo "  2. Hubo un error en la creación (verifica en la consola)"
           echo ""
           echo "📋 Próximos pasos:"
-          echo "1. Espera 20-30 minutos"
-          echo "2. Verifica el estado en:"
+          echo "1. Verifica el estado en:"
           echo "   https://console.cloud.google.com/composer/environments?project=$PROJECT_ID"
+          echo ""
+          echo "2. Si Composer está CREATING, espera 20-30 minutos y vuelve a ejecutar el workflow"
+          echo ""
+          echo "3. Si Composer está en ERROR, revisa los logs en la consola"
           echo ""
           echo "⚠️  Continuando sin subir DAGs (se pueden subir después manualmente)"
           echo "bucket=" >> $GITHUB_OUTPUT
