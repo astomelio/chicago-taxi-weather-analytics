@@ -141,6 +141,56 @@ def trigger_weather_function(historical=True, **context):
         print(f"❌ Error inesperado: {e}")
         raise
 
+# Crear vista taxi_trips_raw si no existe (para acceso a dataset público)
+def create_taxi_trips_raw_view(**context):
+    """Crea la vista taxi_trips_raw si no existe para acceder al dataset público."""
+    from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
+    
+    hook = BigQueryHook(project_id=PROJECT_ID, location=REGION)
+    
+    view_query = f"""
+    CREATE VIEW IF NOT EXISTS `{PROJECT_ID}.chicago_taxi_raw.taxi_trips_raw` AS
+    SELECT 
+      unique_key,
+      taxi_id,
+      trip_start_timestamp,
+      trip_end_timestamp,
+      trip_seconds,
+      trip_miles,
+      pickup_census_tract,
+      dropoff_census_tract,
+      pickup_community_area,
+      dropoff_community_area,
+      fare,
+      tips,
+      tolls,
+      extras,
+      trip_total,
+      payment_type,
+      company,
+      pickup_latitude,
+      pickup_longitude,
+      dropoff_latitude,
+      dropoff_longitude
+    FROM `bigquery-public-data.chicago_taxi_trips.taxi_trips`
+    WHERE DATE(trip_start_timestamp) >= '2023-06-01'
+      AND DATE(trip_start_timestamp) <= '2023-12-31'
+    """
+    
+    try:
+        hook.run_query(view_query, use_legacy_sql=False)
+        print(f"✅ Vista taxi_trips_raw creada o ya existe")
+    except Exception as e:
+        print(f"⚠️  Error creando vista: {e}")
+        print("   Continuando de todas formas...")
+
+create_view = PythonOperator(
+    task_id='create_taxi_trips_raw_view',
+    python_callable=create_taxi_trips_raw_view,
+    pool=None,
+    dag=historical_dag,
+)
+
 # Tareas para DAG histórico
 check_historical = PythonOperator(
     task_id='check_historical_data',
@@ -227,8 +277,8 @@ run_dbt_daily = BashOperator(
 )
 
 # Dependencias para DAG histórico
-# dbt crea taxi_trips_silver directamente, no necesitamos paso separado
-check_historical >> trigger_weather_historical >> run_dbt_silver >> run_dbt_gold
+# Crear vista primero, luego verificar datos históricos, luego el resto
+create_view >> check_historical >> trigger_weather_historical >> run_dbt_silver >> run_dbt_gold
 
 # Dependencias para DAG diario
 trigger_weather_daily >> run_dbt_daily
