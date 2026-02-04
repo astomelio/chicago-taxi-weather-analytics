@@ -510,14 +510,22 @@ jobs:
           # NOTA: Composer 2.x no acepta --disk-size ni --python-version
           # Usamos --async para que no espere (evita timeout del workflow)
           echo "🔄 Ejecutando comando de creación..."
-          CREATE_OUTPUT=$(gcloud composer environments create "$COMPOSER_ENV" \
+          
+          # Ejecutar el comando y capturar output y exit code
+          # Usar temporal file para asegurar que capturamos todo el output
+          TEMP_OUTPUT=$(mktemp)
+          set +e  # Desactivar error estricto temporalmente
+          gcloud composer environments create "$COMPOSER_ENV" \
             --location "$REGION" \
             --project "$PROJECT_ID" \
             --image-version composer-2.4.0-airflow-2.5.0 \
             --machine-type n1-standard-2 \
             --node-count 3 \
-            --async 2>&1)
+            --async > "$TEMP_OUTPUT" 2>&1
           CREATE_EXIT=$?
+          CREATE_OUTPUT=$(cat "$TEMP_OUTPUT")
+          rm -f "$TEMP_OUTPUT"
+          set -e  # Reactivar error estricto
           
           # SIEMPRE mostrar el output para debugging
           echo ""
