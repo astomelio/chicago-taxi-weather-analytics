@@ -412,8 +412,9 @@ jobs:
           
           # Roles necesarios para acceder a datasets públicos y ejecutar queries
           ROLES=(
-            "roles/bigquery.dataViewer"      # Para leer datasets públicos
-            "roles/bigquery.dataEditor"      # Para escribir en nuestros datasets
+            "roles/bigquery.user"            # Permite crear tablas desde datasets públicos
+            "roles/bigquery.dataViewer"       # Para leer datasets públicos
+            "roles/bigquery.dataEditor"       # Para escribir en nuestros datasets
             "roles/bigquery.jobUser"         # Para ejecutar queries
           )
           
