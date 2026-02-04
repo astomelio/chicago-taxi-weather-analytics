@@ -444,21 +444,17 @@ jobs:
           echo "⏳ Esperando propagación de permisos (15 segundos)..."
           sleep 15
           
-          # Autorizar el proyecto para usar el dataset público
+          # IMPORTANTE: BigQuery requiere que un USUARIO (no service account) ejecute
+          # una query contra un dataset público la primera vez para autorizar el proyecto.
+          # El service account no puede hacer esto automáticamente.
           echo ""
-          echo "🔓 Autorizando proyecto para usar dataset público..."
-          bq query --use_legacy_sql=false \
-            --project_id="$PROJECT_ID" \
-            "SELECT 1 FROM \`bigquery-public-data.chicago_taxi_trips.taxi_trips\` LIMIT 1" \
-            > /dev/null 2>&1 || echo "⚠️  Primera query puede fallar, pero autoriza el dataset"
-          
-          # Esperar un poco más para que la autorización se propague
-          echo "⏳ Esperando propagación de autorización (10 segundos más)..."
-          sleep 10
-          
-          # Verificar que los permisos estén activos probando una query que crea tabla temporal
+          echo "🔓 Verificando autorización del proyecto para usar dataset público..."
+          echo "⚠️  NOTA: Si el proyecto no está autorizado, debes ejecutar:"
+          echo "   python3 scripts/authorize_public_dataset.py"
+          echo "   (una sola vez, con credenciales de usuario)"
           echo ""
-          echo "🧪 Verificando acceso completo (CREATE TABLE desde dataset público)..."
+          
+          # Intentar verificar acceso con una query simple
           python3 << 'PYEOF'
           from google.cloud import bigquery
           import os
@@ -468,10 +464,8 @@ jobs:
           client = bigquery.Client(project=project_id)
           
           try:
-              # Query que simula lo que hace dbt: CREATE TABLE AS SELECT
-              # Usamos una tabla temporal para verificar permisos
+              # Query simple para verificar acceso
               test_query = f"""
-              CREATE TEMP TABLE test_public_access AS
               SELECT COUNT(*) as total
               FROM `bigquery-public-data.chicago_taxi_trips.taxi_trips`
               WHERE DATE(trip_start_timestamp) >= '2023-06-01'
@@ -479,15 +473,31 @@ jobs:
               LIMIT 1
               """
               job = client.query(test_query)
-              job.result(timeout=30)
-              print("✅ Acceso completo verificado: puede crear tablas desde dataset público")
+              result = job.result(timeout=30)
+              row = next(result)
+              print(f"✅ Acceso verificado: {row.total:,} filas disponibles")
+              print("✅ El proyecto está autorizado para usar datasets públicos")
               sys.exit(0)
           except Exception as e:
               error_msg = str(e)
-              if "Access Denied" in error_msg or "403" in error_msg:
-                  print(f"❌ Error de acceso: {e}")
-                  print("⚠️  El proyecto necesita estar autorizado para usar datasets públicos")
-                  print("   Esto puede requerir ejecutar una query manualmente la primera vez")
+              if "Access Denied" in error_msg or "403" in error_msg or "permission" in error_msg.lower():
+                  print("="*70)
+                  print("❌ ERROR: El proyecto NO está autorizado para usar datasets públicos")
+                  print("="*70)
+                  print("")
+                  print("🔧 SOLUCIÓN REQUERIDA (una sola vez):")
+                  print("")
+                  print("1. Ejecuta localmente con tus credenciales de usuario:")
+                  print("   export GCP_PROJECT_ID='$PROJECT_ID'")
+                  print("   gcloud auth application-default login")
+                  print("   python3 scripts/authorize_public_dataset.py")
+                  print("")
+                  print("2. O ejecuta esta query en BigQuery Console:")
+                  print("   SELECT 1 FROM \`bigquery-public-data.chicago_taxi_trips.taxi_trips\` LIMIT 1")
+                  print("")
+                  print("3. Después de autorizar, vuelve a hacer push para que el workflow continúe.")
+                  print("")
+                  print("="*70)
                   sys.exit(1)
               else:
                   # Otros errores pueden ser de timeout, pero el acceso está OK
