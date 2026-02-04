@@ -738,13 +738,13 @@ jobs:
           echo "   - Ejecución manual: $IS_MANUAL"
           echo ""
           
-          # Si es ejecución manual, SIEMPRE subir
-          if [ "$IS_MANUAL" == "true" ]; then
-            echo "✅ Ejecución manual - se actualizarán los archivos"
+          # SIEMPRE subir si Composer existe (para asegurar que los DAGs estén actualizados)
+          if [ "$COMPOSER_EXISTS" == "true" ]; then
+            echo "✅ Composer existe - subiendo archivos para asegurar que los DAGs estén presentes y actualizados"
             echo "upload=true" >> $GITHUB_OUTPUT
-          # Si Composer existe, SIEMPRE subir (para asegurar que los DAGs estén presentes)
-          elif [ "$COMPOSER_EXISTS" == "true" ]; then
-            echo "✅ Composer existe - subiendo archivos para asegurar que los DAGs estén presentes"
+          # Si es ejecución manual, SIEMPRE subir
+          elif [ "$IS_MANUAL" == "true" ]; then
+            echo "✅ Ejecución manual - se actualizarán los archivos"
             echo "upload=true" >> $GITHUB_OUTPUT
           # Si hay cambios, subir
           elif [ "$AIRFLOW_CHANGED" == "true" ] || \
