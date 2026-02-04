@@ -391,6 +391,34 @@ jobs:
       - name: Setup GCP Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
       
+      - name: Enable Composer API
+        run: |
+          PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          echo "🔧 Habilitando Cloud Composer API..."
+          gcloud services enable composer.googleapis.com --project="$PROJECT_ID" || echo "⚠️  API ya habilitada o error"
+          echo "⏳ Esperando propagación de API (10 segundos)..."
+          sleep 10
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        continue-on-error: true
+      
+      - name: Grant Composer permissions to service account
+        run: |
+          PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          SA_EMAIL=$(echo '${{ secrets.GCP_SA_KEY }}' | jq -r '.client_email')
+          
+          echo "🔐 Otorgando permisos de Composer al service account..."
+          gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+            --member="serviceAccount:$SA_EMAIL" \
+            --role="roles/composer.admin" \
+            --condition=None 2>&1 || echo "⚠️  Error otorgando permisos (puede que ya existan)"
+          
+          echo "⏳ Esperando propagación de permisos (5 segundos)..."
+          sleep 5
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        continue-on-error: true
+      
       - name: Check if Composer environment exists
         id: check-composer
         run: |
