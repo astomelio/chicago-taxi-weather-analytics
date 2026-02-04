@@ -574,6 +574,17 @@ jobs:
       - name: Create taxi_trips_silver table directly
         run: |
           PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          echo "🔄 Activando acceso del service account a dataset público..."
+          
+          # Primero ejecutar una query simple para activar el acceso del service account
+          echo "   Ejecutando query de activación..."
+          bq query --use_legacy_sql=false \
+            "SELECT COUNT(*) as total FROM \`bigquery-public-data.chicago_taxi_trips.taxi_trips\` WHERE DATE(trip_start_timestamp) >= '2023-06-01' AND DATE(trip_start_timestamp) <= '2023-12-31' LIMIT 1" \
+            > /dev/null 2>&1 || echo "⚠️  Query de activación falló, pero continuando..."
+          
+          echo "⏳ Esperando propagación de permisos (10 segundos)..."
+          sleep 10
+          
           echo "🔄 Creando tabla taxi_trips_silver directamente desde dataset público..."
           
           # Crear la tabla directamente usando bq query para evitar problemas de permisos
