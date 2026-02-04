@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.providers.google.cloud.operators.bigquery import BigQueryInsertJobOperator
 from airflow.providers.google.cloud.operators.bigquery import BigQueryCheckOperator
+from airflow.providers.google.cloud.operators.functions import CloudFunctionsInvokeFunctionOperator
 from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
 from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
@@ -133,9 +134,12 @@ check_historical = PythonOperator(
     dag=historical_dag,
 )
 
-trigger_weather_historical = PythonOperator(
+trigger_weather_historical = CloudFunctionsInvokeFunctionOperator(
     task_id='trigger_weather_historical',
-    python_callable=trigger_weather_function,
+    function_id='weather-ingestion',
+    location=REGION,
+    project_id=PROJECT_ID,
+    input_data='{"historical": true}',
     dag=historical_dag,
 )
 
@@ -230,9 +234,12 @@ run_dbt_gold = BashOperator(
 )
 
 # Tareas para DAG diario
-trigger_weather_daily = PythonOperator(
+trigger_weather_daily = CloudFunctionsInvokeFunctionOperator(
     task_id='trigger_weather_daily',
-    python_callable=lambda **context: trigger_weather_function(historical=False, **context),
+    function_id='weather-ingestion',
+    location=REGION,
+    project_id=PROJECT_ID,
+    input_data='{"historical": false}',
     dag=daily_dag,
 )
 
