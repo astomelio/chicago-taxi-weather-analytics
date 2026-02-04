@@ -59,13 +59,14 @@ def check_historical_data_exists(**context):
     """Verifica si ya existen datos históricos para evitar re-procesamiento."""
     print(f"🔍 Verificando datos históricos en {PROJECT_ID}.{RAW_DATASET}.weather_data")
     hook = BigQueryHook(project_id=PROJECT_ID, location=REGION)
+    # Usar formato correcto sin backticks alrededor del project_id
     query = f"""
     SELECT COUNT(DISTINCT date) as days_count
     FROM `{PROJECT_ID}.{RAW_DATASET}.weather_data`
     WHERE date >= '2023-06-01' AND date <= '2023-12-31'
     """
     try:
-        result = hook.get_first(query)
+        result = hook.get_first(query, project_id=PROJECT_ID, location=REGION)
         days_count = result[0] if result else 0
         print(f"📊 Días encontrados: {days_count}")
     except Exception as e:
@@ -146,12 +147,28 @@ def create_taxi_trips_raw_view(**context):
     """Crea la vista taxi_trips_raw si no existe para acceder al dataset público."""
     from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
     from google.cloud import bigquery
+    from google.cloud.exceptions import NotFound
     
     hook = BigQueryHook(project_id=PROJECT_ID, location=REGION)
     client = hook.get_client()
     
+    # Primero verificar si la vista ya existe
+    dataset_ref = client.dataset('chicago_taxi_raw', project=PROJECT_ID)
+    table_ref = dataset_ref.table('taxi_trips_raw')
+    
+    try:
+        client.get_table(table_ref)
+        print(f"✅ Vista taxi_trips_raw ya existe. Saltando creación.")
+        return
+    except NotFound:
+        print(f"📋 Vista taxi_trips_raw no existe. Creándola...")
+    except Exception as e:
+        print(f"⚠️  Error verificando si la vista existe: {e}")
+        print("   Intentando crear de todas formas...")
+    
+    # Si no existe, crearla
     view_query = f"""
-    CREATE VIEW IF NOT EXISTS `{PROJECT_ID}.chicago_taxi_raw.taxi_trips_raw` AS
+    CREATE VIEW `{PROJECT_ID}.chicago_taxi_raw.taxi_trips_raw` AS
     SELECT 
       unique_key,
       taxi_id,
@@ -184,16 +201,31 @@ def create_taxi_trips_raw_view(**context):
         job_config = bigquery.QueryJobConfig(use_legacy_sql=False)
         query_job = client.query(view_query, job_config=job_config, location=REGION)
         query_job.result()  # Esperar a que termine
-        print(f"✅ Vista taxi_trips_raw creada o ya existe")
+        
+        # Verificar que se creó correctamente
+        try:
+            client.get_table(table_ref)
+            print(f"✅ Vista taxi_trips_raw creada y verificada exitosamente")
+        except NotFound:
+            print(f"❌ ERROR: La vista no se creó aunque la query no falló")
+            raise Exception("La vista no se pudo crear. Revisa los permisos y logs de BigQuery.")
+            
     except Exception as e:
         error_msg = str(e)
         # Si la vista ya existe, no es un error crítico
         if "already exists" in error_msg.lower() or "duplicate" in error_msg.lower():
-            print(f"✅ Vista taxi_trips_raw ya existe")
+            print(f"✅ Vista taxi_trips_raw ya existe (creada entre la verificación y ahora)")
+            # Verificar que existe
+            try:
+                client.get_table(table_ref)
+                print(f"✅ Vista verificada y existe")
+            except NotFound:
+                print(f"⚠️  Advertencia: La vista dice que existe pero no se puede acceder")
         else:
-            print(f"⚠️  Error creando vista: {e}")
-            print("   Intentando continuar de todas formas...")
-            # No hacer raise para que el DAG continúe
+            print(f"❌ Error creando vista: {e}")
+            print(f"   Query: {view_query[:200]}...")
+            print("   Esto causará que dbt falle. Revisa los permisos.")
+            raise  # Hacer raise para que el DAG falle si no se puede crear
 
 create_view = PythonOperator(
     task_id='create_taxi_trips_raw_view',
