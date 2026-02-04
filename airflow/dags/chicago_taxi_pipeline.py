@@ -91,34 +91,25 @@ def trigger_weather_function(historical=True, **context):
     try:
         from google.auth import default
         from google.auth.transport.requests import Request
-        import google.auth.transport.requests
+        from google.oauth2 import id_token
         
         # Obtener credenciales por defecto
         credentials, project = default()
-        
-        # Crear request para obtener ID token
         request_obj = Request()
         
         # Obtener ID token para la URL de la función
-        # Para Cloud Functions, necesitamos un ID token, no un access token
-        from google.auth import _helpers
-        from google.oauth2 import id_token
-        
-        # Intentar obtener ID token
+        token = id_token.fetch_id_token(request_obj, function_url)
+        print(f"✅ ID token obtenido para autenticación")
+    except Exception as e:
+        print(f"⚠️  Error obteniendo ID token: {e}")
+        print("   Intentando con access token como fallback...")
         try:
-            # Usar google.auth para obtener ID token
-            id_token_creds = google.auth.transport.requests.Request()
-            token = id_token.fetch_id_token(request_obj, function_url)
-        except Exception:
-            # Fallback: usar access token (puede no funcionar para funciones privadas)
             credentials.refresh(request_obj)
             token = credentials.token
-        
-        print(f"✅ Token obtenido para autenticación")
-    except Exception as e:
-        print(f"⚠️  Error obteniendo token: {e}")
-        print("   Intentando sin autenticación (puede fallar si la función requiere auth)")
-        token = None
+            print(f"✅ Access token obtenido (puede no funcionar para funciones privadas)")
+        except Exception as e2:
+            print(f"❌ Error obteniendo cualquier token: {e2}")
+            token = None
     
     # Trigger con parámetro histórico
     payload = {"historical": historical}
