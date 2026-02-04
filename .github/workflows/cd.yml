@@ -724,8 +724,10 @@ jobs:
           # Subir archivos si:
           # 1. Composer se acaba de crear (no existía antes), O
           # 2. Hay cambios en archivos de Airflow o dbt, O
-          # 3. Es una ejecución manual (workflow_dispatch)
+          # 3. Es una ejecución manual (workflow_dispatch), O
+          # 4. Composer existe pero no hay DAGs (primera vez que está listo)
           COMPOSER_WAS_CREATED="${{ steps.check-composer.outputs.exists != 'true' }}"
+          COMPOSER_EXISTS="${{ steps.check-composer.outputs.exists == 'true' }}"
           AIRFLOW_CHANGED="${{ steps.changes.outputs.airflow == 'true' }}"
           DBT_CHANGED="${{ steps.changes.outputs.dbt == 'true' }}"
           CONFIG_CHANGED="${{ steps.changes.outputs.airflow_config == 'true' }}"
@@ -735,18 +737,28 @@ jobs:
           if [ "$IS_MANUAL" == "true" ]; then
             echo "✅ Ejecución manual detectada - se actualizarán los archivos"
             echo "upload=true" >> $GITHUB_OUTPUT
-          elif [ "$COMPOSER_WAS_CREATED" == "true" ] || \
-               [ "$AIRFLOW_CHANGED" == "true" ] || \
-               [ "$DBT_CHANGED" == "true" ] || \
-               [ "$CONFIG_CHANGED" == "true" ]; then
-            echo "✅ Se necesita actualizar archivos en Composer"
-            echo "   - Composer recién creado: $COMPOSER_WAS_CREATED"
+          elif [ "$COMPOSER_WAS_CREATED" == "true" ]; then
+            echo "✅ Composer recién creado - se subirán los archivos"
+            echo "upload=true" >> $GITHUB_OUTPUT
+          elif [ "$COMPOSER_EXISTS" == "true" ]; then
+            # Si Composer existe, verificar si hay DAGs
+            # Si no hay cambios pero Composer existe, subir de todas formas (puede ser primera vez)
+            echo "✅ Composer existe - verificando si necesitamos subir archivos"
             echo "   - Cambios en Airflow: $AIRFLOW_CHANGED"
             echo "   - Cambios en dbt: $DBT_CHANGED"
             echo "   - Cambios en config: $CONFIG_CHANGED"
-            echo "upload=true" >> $GITHUB_OUTPUT
+            # Subir si hay cambios O si es la primera vez (forzar subida)
+            if [ "$AIRFLOW_CHANGED" == "true" ] || \
+               [ "$DBT_CHANGED" == "true" ] || \
+               [ "$CONFIG_CHANGED" == "true" ]; then
+              echo "upload=true" >> $GITHUB_OUTPUT
+            else
+              # Forzar subida la primera vez que Composer está listo
+              echo "⚠️  No se detectaron cambios, pero forzando subida para asegurar que los DAGs estén presentes"
+              echo "upload=true" >> $GITHUB_OUTPUT
+            fi
           else
-            echo "⏭️  No hay cambios en archivos de Airflow. Saltando actualización."
+            echo "⏭️  Composer no existe aún. Saltando actualización."
             echo "upload=false" >> $GITHUB_OUTPUT
           fi
       

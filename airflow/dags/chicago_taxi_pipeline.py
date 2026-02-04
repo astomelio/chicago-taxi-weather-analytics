@@ -12,9 +12,16 @@ from airflow.operators.bash import BashOperator
 from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
 import os
 
-# Configuración
-PROJECT_ID = os.environ.get('GCP_PROJECT_ID', 'brave-computer-454217-q4')
-REGION = os.environ.get('GCP_REGION', 'us-central1')
+# Configuración - usar variables de Airflow si están disponibles
+from airflow.models import Variable
+
+try:
+    PROJECT_ID = Variable.get('GCP_PROJECT_ID', default_var='brave-computer-454217-q4')
+    REGION = Variable.get('GCP_REGION', default_var='us-central1')
+except:
+    # Fallback si las variables no están disponibles
+    PROJECT_ID = os.environ.get('GCP_PROJECT_ID', 'brave-computer-454217-q4')
+    REGION = os.environ.get('GCP_REGION', 'us-central1')
 RAW_DATASET = 'chicago_taxi_raw'
 SILVER_DATASET = 'chicago_taxi_silver'
 GOLD_DATASET = 'chicago_taxi_gold'
@@ -176,10 +183,10 @@ create_taxi_trips_silver = BigQueryExecuteQueryOperator(
 run_dbt_silver = BashOperator(
     task_id='run_dbt_silver',
     bash_command="""
-    cd /home/airflow/gcs/dags/dbt && \
+    cd /home/airflow/gcs/data/dbt && \
     export GCP_PROJECT_ID={{ var.value.GCP_PROJECT_ID }} && \
     export DBT_DATASET=chicago_taxi_silver && \
-    dbt run --models weather_silver --profiles-dir /home/airflow/gcs/dags/dbt
+    dbt run --models weather_silver --profiles-dir /home/airflow/gcs/data/dbt
     """,
     dag=historical_dag,
 )
@@ -187,10 +194,10 @@ run_dbt_silver = BashOperator(
 run_dbt_gold = BashOperator(
     task_id='run_dbt_gold',
     bash_command="""
-    cd /home/airflow/gcs/dags/dbt && \
+    cd /home/airflow/gcs/data/dbt && \
     export GCP_PROJECT_ID={{ var.value.GCP_PROJECT_ID }} && \
     export DBT_DATASET=chicago_taxi_silver && \
-    dbt run --models gold --profiles-dir /home/airflow/gcs/dags/dbt
+    dbt run --models gold --profiles-dir /home/airflow/gcs/data/dbt
     """,
     dag=historical_dag,
 )
@@ -205,10 +212,10 @@ trigger_weather_daily = PythonOperator(
 run_dbt_daily = BashOperator(
     task_id='run_dbt_daily',
     bash_command="""
-    cd /home/airflow/gcs/dags/dbt && \
+    cd /home/airflow/gcs/data/dbt && \
     export GCP_PROJECT_ID={{ var.value.GCP_PROJECT_ID }} && \
     export DBT_DATASET=chicago_taxi_silver && \
-    dbt run --profiles-dir /home/airflow/gcs/dags/dbt
+    dbt run --profiles-dir /home/airflow/gcs/data/dbt
     """,
     dag=daily_dag,
 )
