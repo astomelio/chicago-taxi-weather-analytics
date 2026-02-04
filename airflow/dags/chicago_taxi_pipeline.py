@@ -32,6 +32,7 @@ default_args = {
     'retries': 2,
     'retry_delay': timedelta(minutes=5),
     'start_date': datetime(2024, 1, 1),
+    'pool': None,  # No usar pool por defecto
 }
 
 # DAG para ingesta histórica (ejecutar una vez)
@@ -56,6 +57,7 @@ daily_dag = DAG(
 
 def check_historical_data_exists(**context):
     """Verifica si ya existen datos históricos para evitar re-procesamiento."""
+    print(f"🔍 Verificando datos históricos en {PROJECT_ID}.{RAW_DATASET}.weather_data")
     hook = BigQueryHook(project_id=PROJECT_ID, location=REGION)
     query = f"""
     SELECT COUNT(DISTINCT date) as days_count
@@ -65,18 +67,20 @@ def check_historical_data_exists(**context):
     try:
         result = hook.get_first(query)
         days_count = result[0] if result else 0
+        print(f"📊 Días encontrados: {days_count}")
     except Exception as e:
         # Si la tabla no existe, asumimos que no hay datos históricos
         print(f"⚠️  Error verificando datos históricos: {e}")
         print("   Asumiendo que no hay datos históricos y procediendo con la ingesta.")
-        return 'run_historical_ingestion'
+        print("   Continuando con la ingesta histórica...")
+        return
     
     if days_count >= 180:
-        print(f"✅ Ya existen {days_count} días de datos históricos. Saltando ingesta histórica.")
-        return 'skip_historical_ingestion'
+        print(f"✅ Ya existen {days_count} días de datos históricos (>= 180).")
+        print("   Continuando con el pipeline (dbt puede actualizar datos existentes).")
     else:
         print(f"⚠️  Solo hay {days_count} días. Necesitamos ingesta histórica.")
-        return 'run_historical_ingestion'
+        print("   Continuando con la ingesta histórica...")
 
 def trigger_weather_function(historical=True, **context):
     """Trigger la Cloud Function de ingesta de clima usando ID token."""
@@ -141,6 +145,7 @@ def trigger_weather_function(historical=True, **context):
 check_historical = PythonOperator(
     task_id='check_historical_data',
     python_callable=check_historical_data_exists,
+    pool=None,  # No usar pool para evitar problemas de recursos
     dag=historical_dag,
 )
 
@@ -148,6 +153,7 @@ trigger_weather_historical = PythonOperator(
     task_id='trigger_weather_historical',
     python_callable=trigger_weather_function,
     op_kwargs={'historical': True},
+    pool=None,  # No usar pool
     dag=historical_dag,
 )
 
@@ -170,6 +176,7 @@ run_dbt_silver = BashOperator(
         'project_id': PROJECT_ID,
         'sa_key_path': '/home/airflow/gcs/data/github-actions-key.json'
     },
+    pool=None,  # No usar pool
     dag=historical_dag,
 )
 
@@ -189,6 +196,7 @@ run_dbt_gold = BashOperator(
         'project_id': PROJECT_ID,
         'sa_key_path': '/home/airflow/gcs/data/github-actions-key.json'
     },
+    pool=None,  # No usar pool
     dag=historical_dag,
 )
 
