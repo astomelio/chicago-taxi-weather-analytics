@@ -81,33 +81,49 @@ def check_historical_data_exists(**context):
 
 def trigger_weather_function(historical=True, **context):
     """Trigger la Cloud Function de ingesta de clima."""
-    from google.cloud import functions_v1
-    import json
     import requests
+    import json
     
     function_url = f"https://{REGION}-{PROJECT_ID}.cloudfunctions.net/weather-ingestion"
     
-    # Obtener token de autenticación
-    from google.auth import default
-    from google.auth.transport.requests import Request
-    
-    credentials, _ = default()
-    credentials.refresh(Request())
-    token = credentials.token
+    # Obtener token de autenticación usando google.auth (ya disponible en Airflow)
+    try:
+        from google.auth import default
+        from google.auth.transport.requests import Request
+        
+        credentials, _ = default()
+        credentials.refresh(Request())
+        token = credentials.token
+    except Exception as e:
+        print(f"⚠️  Error obteniendo token de autenticación: {e}")
+        print("   Intentando sin autenticación (puede fallar si la función requiere auth)")
+        token = None
     
     # Trigger con parámetro histórico
     payload = {"historical": historical}
     headers = {
-        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json"
     }
     
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    
     try:
+        print(f"🔄 Invocando Cloud Function: {function_url}")
+        print(f"   Payload: {json.dumps(payload)}")
         response = requests.post(function_url, json=payload, headers=headers, timeout=900)
         response.raise_for_status()
         print(f"✅ Cloud Function triggered successfully: {response.status_code}")
+        if response.text:
+            print(f"   Response: {response.text[:200]}")
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Error triggering function: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            print(f"   Status code: {e.response.status_code}")
+            print(f"   Response: {e.response.text[:200]}")
+        raise
     except Exception as e:
-        print(f"⚠️  Error triggering function: {e}")
+        print(f"❌ Error inesperado: {e}")
         raise
 
 # Tareas para DAG histórico
