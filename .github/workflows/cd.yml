@@ -519,7 +519,7 @@ jobs:
           gcloud composer environments create "$COMPOSER_ENV" \
             --location "$REGION" \
             --project "$PROJECT_ID" \
-            --image-version composer-2.4.0-airflow-2.5.0 \
+            --image-version composer-2.16.3-airflow-2.10.5 \
             --node-count 3 \
             --async > "$TEMP_OUTPUT" 2>&1
           CREATE_EXIT=$?
