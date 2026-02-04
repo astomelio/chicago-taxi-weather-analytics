@@ -136,6 +136,7 @@ jobs:
       
       - name: Import existing resources
         run: |
+          set +e  # Desactivar modo de error estricto para este step
           echo "🔄 Verificando y importando recursos existentes..."
           
           # Función para importar si el recurso existe
@@ -164,7 +165,8 @@ jobs:
                 # El recurso existe pero no está en el estado, intentar importar de nuevo con -lock=false
                 terraform import -lock=false "$resource" "$import_id" 2>&1 || echo "   No se pudo forzar import"
               else
-                echo "⚠️  No se pudo importar $resource_name: $IMPORT_OUTPUT"
+                echo "⚠️  No se pudo importar $resource_name (esto es OK si el recurso no existe aún):"
+                echo "   $IMPORT_OUTPUT"
               fi
               return 0  # No fallar
             fi
