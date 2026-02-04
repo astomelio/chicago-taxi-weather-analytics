@@ -437,6 +437,37 @@ jobs:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
         continue-on-error: true
       
+      - name: Grant permissions to Cloud Composer Service Agent
+        run: |
+          PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          
+          # Obtener el PROJECT_NUMBER del proyecto
+          echo "🔍 Obteniendo PROJECT_NUMBER del proyecto..."
+          PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)" 2>/dev/null || echo "")
+          
+          if [ -z "$PROJECT_NUMBER" ]; then
+            echo "❌ No se pudo obtener PROJECT_NUMBER. El service agent no se puede configurar automáticamente."
+            echo "   Por favor, otorga manualmente el rol roles/composer.ServiceAgentV2Ext al service agent:"
+            echo "   service-{PROJECT_NUMBER}@cloudcomposer-accounts.iam.gserviceaccount.com"
+            echo "   Puedes encontrar el PROJECT_NUMBER en: https://console.cloud.google.com/iam-admin/settings?project=$PROJECT_ID"
+            exit 1
+          fi
+          
+          COMPOSER_SERVICE_AGENT="service-${PROJECT_NUMBER}@cloudcomposer-accounts.iam.gserviceaccount.com"
+          echo "🔐 Otorgando permisos al Cloud Composer Service Agent: $COMPOSER_SERVICE_AGENT"
+          echo "   Rol: roles/composer.ServiceAgentV2Ext"
+          
+          gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+            --member="serviceAccount:$COMPOSER_SERVICE_AGENT" \
+            --role="roles/composer.ServiceAgentV2Ext" \
+            --condition=None 2>&1 || echo "⚠️  Error otorgando permisos (puede que ya existan)"
+          
+          echo "⏳ Esperando propagación de permisos (5 segundos)..."
+          sleep 5
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        continue-on-error: false
+      
       - name: Check if Composer environment exists
         id: check-composer
         run: |
