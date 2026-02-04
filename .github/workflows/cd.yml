@@ -575,17 +575,13 @@ jobs:
         with:
           fetch-depth: 2  # Necesario para detectar cambios
       
-      - name: Detect changes in Airflow files
+      - name: Use detected changes
         id: changes
-        uses: dorny/paths-filter@v2
-        with:
-          filters: |
-            airflow:
-              - 'airflow/**'
-            dbt:
-              - 'dbt/**'
-            airflow_config:
-              - '.github/workflows/cd.yml'
+        run: |
+          # Usar los cambios detectados en el job detect-changes
+          echo "airflow=${{ needs.detect-changes.outputs.airflow_dags }}" >> $GITHUB_OUTPUT
+          echo "dbt=${{ needs.detect-changes.outputs.dbt }}" >> $GITHUB_OUTPUT
+          echo "airflow_config=${{ needs.detect-changes.outputs.airflow_config }}" >> $GITHUB_OUTPUT
       
       - name: Setup GCP Auth
         uses: google-github-actions/auth@v1
