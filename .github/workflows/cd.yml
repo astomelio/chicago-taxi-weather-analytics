@@ -16,9 +16,40 @@ env:
   PYTHON_VERSION: '3.9'
 
 jobs:
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      terraform: ${{ steps.filter.outputs.terraform }}
+      functions: ${{ steps.filter.outputs.functions }}
+      airflow_dags: ${{ steps.filter.outputs.airflow_dags }}
+      dbt: ${{ steps.filter.outputs.dbt }}
+      airflow_config: ${{ steps.filter.outputs.airflow_config }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Detect file changes
+        id: filter
+        uses: dorny/paths-filter@v2
+        with:
+          filters: |
+            terraform:
+              - 'terraform/**'
+            functions:
+              - 'functions/**'
+            airflow_dags:
+              - 'airflow/dags/**'
+            dbt:
+              - 'dbt/**'
+            airflow_config:
+              - '.github/workflows/cd.yml'
+  
   prepare-function-zip:
     name: Prepare Cloud Function ZIP
     runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.terraform == 'true' || needs.detect-changes.outputs.functions == 'true'
     
     steps:
       - name: Checkout code
@@ -38,6 +69,10 @@ jobs:
           retention-days: 1
 
   deploy-terraform:
+    name: Deploy Infrastructure with Terraform
+    runs-on: ubuntu-latest
+    needs: [detect-changes, prepare-function-zip]
+    if: needs.detect-changes.outputs.terraform == 'true' || needs.detect-changes.outputs.functions == 'true'
     name: Deploy Infrastructure with Terraform
     runs-on: ubuntu-latest
     needs: prepare-function-zip
@@ -375,10 +410,161 @@ jobs:
         run: |
           echo "⏭️  Datos históricos ya existen. Saltando ingesta histórica."
 
+  quick-update-dags:
+    name: Quick Update DAGs Only
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: |
+      (needs.detect-changes.outputs.airflow_dags == 'true' || needs.detect-changes.outputs.dbt == 'true') &&
+      needs.detect-changes.outputs.terraform != 'true' &&
+      needs.detect-changes.outputs.functions != 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Setup GCP Auth
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Setup GCP Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+      
+      - name: Check if Composer exists
+        id: check-composer
+        run: |
+          PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          REGION="${{ secrets.GCP_REGION || 'us-central1' }}"
+          COMPOSER_ENV="chicago-taxi-composer"
+          
+          ENV_STATE=$(gcloud composer environments describe "$COMPOSER_ENV" \
+            --location "$REGION" \
+            --project "$PROJECT_ID" \
+            --format="value(state)" 2>/dev/null || echo "NOT_FOUND")
+          
+          if [ "$ENV_STATE" == "RUNNING" ]; then
+            echo "✅ Composer existe y está RUNNING"
+            echo "exists=true" >> $GITHUB_OUTPUT
+          elif [ "$ENV_STATE" == "CREATING" ] || [ "$ENV_STATE" == "UPDATING" ]; then
+            echo "⏳ Composer está en estado: $ENV_STATE"
+            echo "exists=false" >> $GITHUB_OUTPUT
+            exit 1
+          else
+            echo "❌ Composer no existe o está en estado: $ENV_STATE"
+            echo "exists=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ secrets.GCP_REGION || 'us-central1' }}
+        continue-on-error: true
+      
+      - name: Get Composer bucket
+        if: steps.check-composer.outputs.exists == 'true'
+        id: get-bucket
+        run: |
+          PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          REGION="${{ secrets.GCP_REGION || 'us-central1' }}"
+          COMPOSER_ENV="chicago-taxi-composer"
+          
+          BUCKET=$(gcloud composer environments describe "$COMPOSER_ENV" \
+            --location "$REGION" \
+            --project "$PROJECT_ID" \
+            --format="value(config.dagGcsPrefix)" 2>/dev/null | sed 's|/dags||' || echo "")
+          
+          if [ -z "$BUCKET" ]; then
+            echo "❌ No se pudo obtener el bucket de Composer"
+            exit 1
+          fi
+          
+          echo "✅ Bucket: $BUCKET"
+          echo "bucket=$BUCKET" >> $GITHUB_OUTPUT
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ secrets.GCP_REGION || 'us-central1' }}
+        continue-on-error: false
+      
+      - name: Upload DAGs to Composer
+        if: steps.get-bucket.outputs.bucket != ''
+        run: |
+          BUCKET_RAW="${{ steps.get-bucket.outputs.bucket }}"
+          BUCKET=$(echo "$BUCKET_RAW" | sed 's|^gs://||')
+          BUCKET_PATH="gs://$BUCKET"
+          
+          echo "📤 Subiendo DAGs actualizados a Composer..."
+          
+          if [ ! -d "airflow/dags" ]; then
+            echo "❌ ERROR: Directorio airflow/dags no existe"
+            exit 1
+          fi
+          
+          for dag_file in airflow/dags/*.py; do
+            if [ -f "$dag_file" ]; then
+              filename=$(basename "$dag_file")
+              echo "📤 Subiendo $filename..."
+              gsutil cp "$dag_file" "$BUCKET_PATH/dags/$filename"
+              echo "   ✅ $filename subido"
+            fi
+          done
+          
+          echo "✅ DAGs actualizados"
+        continue-on-error: false
+      
+      - name: Upload dbt to Composer (if changed)
+        if: steps.get-bucket.outputs.bucket != '' && needs.detect-changes.outputs.dbt == 'true'
+        run: |
+          BUCKET_RAW="${{ steps.get-bucket.outputs.bucket }}"
+          BUCKET=$(echo "$BUCKET_RAW" | sed 's|^gs://||')
+          BUCKET_PATH="gs://$BUCKET"
+          
+          echo "📤 Subiendo dbt actualizado a Composer..."
+          
+          TEMP_DBT_DIR=$(mktemp -d)
+          cp -r dbt/* "$TEMP_DBT_DIR/" 2>/dev/null || true
+          
+          printf '%s\n' \
+            'chicago_taxi_analysis:' \
+            '  target: dev' \
+            '  outputs:' \
+            '    dev:' \
+            '      type: bigquery' \
+            '      method: oauth' \
+            '      project: "{{ env_var('\''GCP_PROJECT_ID'\'') }}"' \
+            '      dataset: "{{ env_var('\''DBT_DATASET'\'', '\''chicago_taxi_silver'\'') }}"' \
+            '      location: us-central1' \
+            '      threads: 4' \
+            '      timeout_seconds: 300' \
+            '      priority: interactive' \
+            '      maximum_bytes_billed: 1000000000' \
+            > "$TEMP_DBT_DIR/profiles.yml"
+          
+          gsutil -m cp -r "$TEMP_DBT_DIR"/* "$BUCKET_PATH/data/dbt/" || true
+          rm -rf "$TEMP_DBT_DIR"
+          
+          echo "✅ dbt actualizado"
+        continue-on-error: true
+      
+      - name: Summary
+        run: |
+          echo "✅ Actualización rápida completada"
+          echo ""
+          echo "📋 Archivos actualizados:"
+          if [ "${{ needs.detect-changes.outputs.airflow_dags }}" == "true" ]; then
+            echo "   - DAGs de Airflow"
+          fi
+          if [ "${{ needs.detect-changes.outputs.dbt }}" == "true" ]; then
+            echo "   - Proyecto dbt"
+          fi
+          echo ""
+          echo "⏳ Espera 1-2 minutos para que Airflow parsee los DAGs"
+          echo "   Luego ejecuta el DAG en Airflow UI"
+
   setup-airflow:
     name: Setup Airflow (Cloud Composer)
     runs-on: ubuntu-latest
     needs: deploy-terraform
+    if: needs.deploy-terraform.result == 'success' || needs.deploy-terraform.result == 'skipped'
     defaults:
       run:
         working-directory: ./
