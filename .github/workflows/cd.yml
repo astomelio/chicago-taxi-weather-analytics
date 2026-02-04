@@ -468,16 +468,50 @@ jobs:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
         continue-on-error: false
       
-      - name: Grant BigQuery permissions to Composer service account
+      - name: Verify billing is enabled
+        run: |
+          PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          
+          echo "💰 Verificando que el proyecto tenga billing habilitado..."
+          echo "   (BigQuery requiere billing incluso para datasets públicos)"
+          
+          BILLING_ACCOUNT=$(gcloud billing projects describe "$PROJECT_ID" \
+            --format="value(billingAccountName)" 2>/dev/null || echo "")
+          
+          if [ -z "$BILLING_ACCOUNT" ] || [ "$BILLING_ACCOUNT" == "" ]; then
+            echo ""
+            echo "=========================================="
+            echo "⚠️  ADVERTENCIA: Billing no configurado"
+            echo "=========================================="
+            echo ""
+            echo "El proyecto NO tiene billing habilitado."
+            echo "BigQuery requiere billing incluso para datasets públicos."
+            echo ""
+            echo "🔧 Solución:"
+            echo "   1. Ve a: https://console.cloud.google.com/billing?project=$PROJECT_ID"
+            echo "   2. Link una cuenta de billing al proyecto"
+            echo ""
+            echo "=========================================="
+            echo ""
+          else
+            echo "✅ Billing habilitado: $BILLING_ACCOUNT"
+          fi
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        continue-on-error: true
+      
+      - name: Grant BigQuery permissions to GitHub Actions service account
         run: |
           PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
           SA_EMAIL=$(echo '${{ secrets.GCP_SA_KEY }}' | jq -r '.client_email')
           
-          echo "🔐 Otorgando permisos de BigQuery al service account de Composer..."
+          echo "🔐 Otorgando permisos de BigQuery al service account de GitHub Actions..."
           echo "   Service Account: $SA_EMAIL"
+          echo "   (Este se usa para CREAR Composer y se especifica como --service-account)"
           
-          # Otorgar roles necesarios para acceder a datasets públicos y crear tablas
-          for ROLE in "roles/bigquery.dataViewer" "roles/bigquery.dataEditor" "roles/bigquery.jobUser" "roles/bigquery.user"; do
+          # Roles necesarios para BigQuery (datasets públicos + crear tablas)
+          # BigQuery User = incluye Data Viewer + Job User + Data Editor básico
+          for ROLE in "roles/bigquery.user" "roles/bigquery.dataViewer" "roles/bigquery.dataEditor" "roles/bigquery.jobUser"; do
             echo "   Otorgando rol: $ROLE"
             gcloud projects add-iam-policy-binding "$PROJECT_ID" \
               --member="serviceAccount:$SA_EMAIL" \
@@ -485,20 +519,86 @@ jobs:
               --condition=None 2>&1 || echo "⚠️  Error otorgando $ROLE (puede que ya exista)"
           done
           
-          # Activar acceso al dataset público ejecutando una query simple
-          echo "🔓 Activando acceso al dataset público de BigQuery..."
-          echo "   Esto es necesario para que el service account pueda acceder a bigquery-public-data"
-          
-          bq query --use_legacy_sql=false \
-            --project_id="$PROJECT_ID" \
-            --location=us-central1 \
-            "SELECT 1 as test FROM \`bigquery-public-data.chicago_taxi_trips.taxi_trips\` LIMIT 1" \
-            2>&1 || echo "⚠️  Error ejecutando query de activación (puede que ya esté activado o requiera usuario)"
-          
-          echo "⏳ Esperando propagación de permisos (5 segundos)..."
-          sleep 5
+          echo "✅ Permisos otorgados al service account de GitHub Actions"
+          echo "⏳ Esperando propagación de permisos (10 segundos)..."
+          sleep 10
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        continue-on-error: true
+      
+      - name: Grant BigQuery permissions to Composer service account (after creation)
+        if: steps.get-bucket.outputs.bucket != ''
+        run: |
+          PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          REGION="${{ secrets.GCP_REGION || 'us-central1' }}"
+          COMPOSER_ENV="chicago-taxi-composer"
+          SA_EMAIL=$(echo '${{ secrets.GCP_SA_KEY }}' | jq -r '.client_email')
+          
+          echo "🔐 Verificando y otorgando permisos de BigQuery al service account de Composer..."
+          echo "   (Composer puede usar un service account diferente después de crearse)"
+          
+          # Obtener el service account real que usa Composer
+          COMPOSER_SA=$(gcloud composer environments describe "$COMPOSER_ENV" \
+            --location "$REGION" \
+            --project "$PROJECT_ID" \
+            --format="value(config.nodeConfig.serviceAccount)" 2>/dev/null || echo "$SA_EMAIL")
+          
+          if [ -z "$COMPOSER_SA" ] || [ "$COMPOSER_SA" == "" ]; then
+            echo "⚠️  No se pudo obtener el service account de Composer, usando el de GitHub Actions"
+            COMPOSER_SA="$SA_EMAIL"
+          fi
+          
+          echo "   Service Account de Composer: $COMPOSER_SA"
+          echo ""
+          echo "   IMPORTANTE: BigQuery requiere:"
+          echo "   1. ✅ Proyecto con billing habilitado"
+          echo "   2. ✅ Service account con permisos BigQuery"
+          echo ""
+          
+          # Roles necesarios para BigQuery (datasets públicos + crear tablas)
+          # BigQuery User = incluye Data Viewer + Job User + Data Editor básico
+          for ROLE in "roles/bigquery.user" "roles/bigquery.dataViewer" "roles/bigquery.dataEditor" "roles/bigquery.jobUser"; do
+            echo "   Otorgando rol $ROLE a $COMPOSER_SA"
+            gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+              --member="serviceAccount:$COMPOSER_SA" \
+              --role="$ROLE" \
+              --condition=None 2>&1 || echo "⚠️  Error otorgando $ROLE (puede que ya exista)"
+          done
+          
+          echo ""
+          echo "✅ Permisos de BigQuery otorgados al service account de Composer"
+          echo ""
+          echo "🧪 Test rápido: Verificar acceso a dataset público..."
+          echo "   (Esto puede fallar si billing no está habilitado o permisos no propagaron)"
+          
+          # Intentar una query simple para verificar permisos
+          bq query --use_legacy_sql=false \
+            --project_id="$PROJECT_ID" \
+            --location="$REGION" \
+            --dry_run \
+            "SELECT COUNT(*) as test FROM \`bigquery-public-data.chicago_taxi_trips.taxi_trips\` LIMIT 1" \
+            2>&1 | head -5 || echo "⚠️  Test falló (puede ser normal si billing no está habilitado)"
+          
+          echo ""
+          echo "⏳ Esperando propagación de permisos (15 segundos)..."
+          sleep 15
+          
+          echo ""
+          echo "📋 Resumen de permisos:"
+          echo "   Service Account: $COMPOSER_SA"
+          echo "   Roles otorgados:"
+          echo "     - roles/bigquery.user"
+          echo "     - roles/bigquery.dataViewer"
+          echo "     - roles/bigquery.dataEditor"
+          echo "     - roles/bigquery.jobUser"
+          echo ""
+          echo "⚠️  NOTA: Si aún falla 'Access Denied', verifica:"
+          echo "   1. Billing está habilitado: https://console.cloud.google.com/billing?project=$PROJECT_ID"
+          echo "   2. Permisos propagaron (puede tardar hasta 5 minutos)"
+          echo "   3. El service account es el correcto: $COMPOSER_SA"
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ secrets.GCP_REGION || 'us-central1' }}
         continue-on-error: true
       
       - name: Check if Composer environment exists
