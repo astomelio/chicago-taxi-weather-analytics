@@ -57,14 +57,20 @@ daily_dag = DAG(
 
 def check_historical_data_exists(**context):
     """Verifica si ya existen datos históricos para evitar re-procesamiento."""
-    hook = BigQueryHook()
+    hook = BigQueryHook(project_id=PROJECT_ID, location=REGION)
     query = f"""
     SELECT COUNT(DISTINCT date) as days_count
     FROM `{PROJECT_ID}.{RAW_DATASET}.weather_data`
     WHERE date >= '2023-06-01' AND date <= '2023-12-31'
     """
-    result = hook.get_first(query)
-    days_count = result[0] if result else 0
+    try:
+        result = hook.get_first(query)
+        days_count = result[0] if result else 0
+    except Exception as e:
+        # Si la tabla no existe, asumimos que no hay datos históricos
+        print(f"⚠️  Error verificando datos históricos: {e}")
+        print("   Asumiendo que no hay datos históricos y procediendo con la ingesta.")
+        return 'run_historical_ingestion'
     
     if days_count >= 180:
         print(f"✅ Ya existen {days_count} días de datos históricos. Saltando ingesta histórica.")
