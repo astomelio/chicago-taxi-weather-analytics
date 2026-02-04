@@ -760,10 +760,16 @@ jobs:
       - name: Upload DAGs to Composer
         if: steps.get-bucket.outputs.bucket != '' && steps.should-upload.outputs.upload == 'true'
         run: |
-          BUCKET="${{ steps.get-bucket.outputs.bucket }}"
+          BUCKET_RAW="${{ steps.get-bucket.outputs.bucket }}"
+          
+          # Normalizar el bucket: remover gs:// si está presente y luego agregarlo
+          BUCKET=$(echo "$BUCKET_RAW" | sed 's|^gs://||')
+          BUCKET_PATH="gs://$BUCKET"
+          
           echo "📤 Subiendo DAGs a Composer..."
-          echo "   Bucket: $BUCKET"
-          echo "   Destino: gs://$BUCKET/dags/"
+          echo "   Bucket raw: $BUCKET_RAW"
+          echo "   Bucket normalizado: $BUCKET"
+          echo "   Destino: $BUCKET_PATH/dags/"
           echo ""
           
           # Verificar que los archivos existen
@@ -782,7 +788,7 @@ jobs:
             if [ -f "$dag_file" ]; then
               filename=$(basename "$dag_file")
               echo "📤 Subiendo $filename..."
-              gsutil cp "$dag_file" "gs://$BUCKET/dags/$filename"
+              gsutil cp "$dag_file" "$BUCKET_PATH/dags/$filename"
               if [ $? -eq 0 ]; then
                 echo "   ✅ $filename subido correctamente"
               else
@@ -795,7 +801,7 @@ jobs:
           # Subir requirements.txt si existe
           if [ -f "airflow/dags/requirements.txt" ]; then
             echo "📤 Subiendo requirements.txt..."
-            gsutil cp airflow/dags/requirements.txt "gs://$BUCKET/data/requirements.txt"
+            gsutil cp airflow/dags/requirements.txt "$BUCKET_PATH/data/requirements.txt"
             echo "   ✅ requirements.txt subido"
           fi
           
@@ -805,25 +811,31 @@ jobs:
           # Verificar que se subieron
           echo ""
           echo "🔍 Verificando DAGs en el bucket:"
-          gsutil ls "gs://$BUCKET/dags/*.py" || echo "⚠️  No se encontraron DAGs en el bucket"
+          gsutil ls "$BUCKET_PATH/dags/*.py" || echo "⚠️  No se encontraron DAGs en el bucket"
         continue-on-error: false
       
       - name: Upload dbt to Composer
         if: steps.get-bucket.outputs.bucket != '' && steps.should-upload.outputs.upload == 'true'
         run: |
-          BUCKET="${{ steps.get-bucket.outputs.bucket }}"
+          BUCKET_RAW="${{ steps.get-bucket.outputs.bucket }}"
+          # Normalizar el bucket: remover gs:// si está presente y luego agregarlo
+          BUCKET=$(echo "$BUCKET_RAW" | sed 's|^gs://||')
+          BUCKET_PATH="gs://$BUCKET"
           echo "📤 Subiendo dbt a Composer..."
-          gsutil -m cp -r dbt/* "gs://$BUCKET/data/dbt/" || true
+          gsutil -m cp -r dbt/* "$BUCKET_PATH/data/dbt/" || true
           echo "✅ dbt subido"
         continue-on-error: true
       
       - name: Upload service account key to Composer
         if: steps.get-bucket.outputs.bucket != '' && steps.should-upload.outputs.upload == 'true'
         run: |
-          BUCKET="${{ steps.get-bucket.outputs.bucket }}"
+          BUCKET_RAW="${{ steps.get-bucket.outputs.bucket }}"
+          # Normalizar el bucket: remover gs:// si está presente y luego agregarlo
+          BUCKET=$(echo "$BUCKET_RAW" | sed 's|^gs://||')
+          BUCKET_PATH="gs://$BUCKET"
           if [ -f "github-actions-key.json" ]; then
             echo "📤 Subiendo service account key..."
-            gsutil cp github-actions-key.json "gs://$BUCKET/data/github-actions-key.json" || true
+            gsutil cp github-actions-key.json "$BUCKET_PATH/data/github-actions-key.json" || true
             echo "✅ Service account key subido"
           else
             echo "⚠️  github-actions-key.json no encontrado. Usando credenciales por defecto."
