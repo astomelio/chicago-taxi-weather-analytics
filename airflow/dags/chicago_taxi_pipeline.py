@@ -145,8 +145,10 @@ def trigger_weather_function(historical=True, **context):
 def create_taxi_trips_raw_view(**context):
     """Crea la vista taxi_trips_raw si no existe para acceder al dataset público."""
     from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
+    from google.cloud import bigquery
     
     hook = BigQueryHook(project_id=PROJECT_ID, location=REGION)
+    client = hook.get_client()
     
     view_query = f"""
     CREATE VIEW IF NOT EXISTS `{PROJECT_ID}.chicago_taxi_raw.taxi_trips_raw` AS
@@ -178,11 +180,20 @@ def create_taxi_trips_raw_view(**context):
     """
     
     try:
-        hook.run_query(view_query, use_legacy_sql=False)
+        # Usar insert_job para ejecutar la query
+        job_config = bigquery.QueryJobConfig(use_legacy_sql=False)
+        query_job = client.query(view_query, job_config=job_config, location=REGION)
+        query_job.result()  # Esperar a que termine
         print(f"✅ Vista taxi_trips_raw creada o ya existe")
     except Exception as e:
-        print(f"⚠️  Error creando vista: {e}")
-        print("   Continuando de todas formas...")
+        error_msg = str(e)
+        # Si la vista ya existe, no es un error crítico
+        if "already exists" in error_msg.lower() or "duplicate" in error_msg.lower():
+            print(f"✅ Vista taxi_trips_raw ya existe")
+        else:
+            print(f"⚠️  Error creando vista: {e}")
+            print("   Intentando continuar de todas formas...")
+            # No hacer raise para que el DAG continúe
 
 create_view = PythonOperator(
     task_id='create_taxi_trips_raw_view',
