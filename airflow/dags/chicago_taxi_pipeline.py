@@ -143,96 +143,10 @@ def trigger_weather_function(historical=True, **context):
         raise
 
 # Crear vista taxi_trips_raw si no existe (para acceso a dataset público)
-def create_taxi_trips_raw_view(**context):
-    """Crea la vista taxi_trips_raw si no existe para acceder al dataset público."""
-    from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
-    from google.cloud import bigquery
-    from google.cloud.exceptions import NotFound
-    
-    hook = BigQueryHook(project_id=PROJECT_ID, location=REGION)
-    client = hook.get_client()
-    
-    # Primero verificar si la vista ya existe
-    dataset_ref = client.dataset('chicago_taxi_raw', project=PROJECT_ID)
-    table_ref = dataset_ref.table('taxi_trips_raw')
-    
-    try:
-        client.get_table(table_ref)
-        print(f"✅ Vista taxi_trips_raw ya existe. Saltando creación.")
-        return
-    except NotFound:
-        print(f"📋 Vista taxi_trips_raw no existe. Creándola...")
-    except Exception as e:
-        print(f"⚠️  Error verificando si la vista existe: {e}")
-        print("   Intentando crear de todas formas...")
-    
-    # Si no existe, crearla
-    view_query = f"""
-    CREATE VIEW `{PROJECT_ID}.chicago_taxi_raw.taxi_trips_raw` AS
-    SELECT 
-      unique_key,
-      taxi_id,
-      trip_start_timestamp,
-      trip_end_timestamp,
-      trip_seconds,
-      trip_miles,
-      pickup_census_tract,
-      dropoff_census_tract,
-      pickup_community_area,
-      dropoff_community_area,
-      fare,
-      tips,
-      tolls,
-      extras,
-      trip_total,
-      payment_type,
-      company,
-      pickup_latitude,
-      pickup_longitude,
-      dropoff_latitude,
-      dropoff_longitude
-    FROM `bigquery-public-data.chicago_taxi_trips.taxi_trips`
-    WHERE DATE(trip_start_timestamp) >= '2023-06-01'
-      AND DATE(trip_start_timestamp) <= '2023-12-31'
-    """
-    
-    try:
-        # Usar insert_job para ejecutar la query
-        job_config = bigquery.QueryJobConfig(use_legacy_sql=False)
-        query_job = client.query(view_query, job_config=job_config, location=REGION)
-        query_job.result()  # Esperar a que termine
-        
-        # Verificar que se creó correctamente
-        try:
-            client.get_table(table_ref)
-            print(f"✅ Vista taxi_trips_raw creada y verificada exitosamente")
-        except NotFound:
-            print(f"❌ ERROR: La vista no se creó aunque la query no falló")
-            raise Exception("La vista no se pudo crear. Revisa los permisos y logs de BigQuery.")
-            
-    except Exception as e:
-        error_msg = str(e)
-        # Si la vista ya existe, no es un error crítico
-        if "already exists" in error_msg.lower() or "duplicate" in error_msg.lower():
-            print(f"✅ Vista taxi_trips_raw ya existe (creada entre la verificación y ahora)")
-            # Verificar que existe
-            try:
-                client.get_table(table_ref)
-                print(f"✅ Vista verificada y existe")
-            except NotFound:
-                print(f"⚠️  Advertencia: La vista dice que existe pero no se puede acceder")
-        else:
-            print(f"❌ Error creando vista: {e}")
-            print(f"   Query: {view_query[:200]}...")
-            print("   Esto causará que dbt falle. Revisa los permisos.")
-            raise  # Hacer raise para que el DAG falle si no se puede crear
-
-create_view = PythonOperator(
-    task_id='create_taxi_trips_raw_view',
-    python_callable=create_taxi_trips_raw_view,
-    pool=None,
-    dag=historical_dag,
-)
+# NOTA: La tarea create_taxi_trips_raw_view fue eliminada porque:
+# 1. El service account de Composer no tiene permisos para acceder al dataset público directamente
+# 2. Ya no es necesaria: load_historical_taxi_data carga los datos directamente a taxi_trips_raw_table
+# 3. dbt lee de taxi_trips_raw_table, no de la vista ni del dataset público
 
 # Cargar datos históricos de taxis a una tabla (no solo vista)
 def load_historical_taxi_data(**context):
@@ -414,13 +328,12 @@ run_dbt_daily = BashOperator(
 )
 
 # Dependencias para DAG histórico
-# 1. Crear vista (para compatibilidad)
-# 2. Cargar datos históricos de taxis a tabla propia
-# 3. Verificar datos históricos de clima
-# 4. Cargar datos históricos de clima
-# 5. Ejecutar dbt silver (lee de la tabla, no del dataset público)
-# 6. Ejecutar dbt gold
-create_view >> load_historical_taxi >> check_historical >> trigger_weather_historical >> run_dbt_silver >> run_dbt_gold
+# 1. Cargar datos históricos de taxis a tabla propia (lee del dataset público)
+# 2. Verificar datos históricos de clima
+# 3. Cargar datos históricos de clima
+# 4. Ejecutar dbt silver (lee de taxi_trips_raw_table, no del dataset público)
+# 5. Ejecutar dbt gold
+load_historical_taxi >> check_historical >> trigger_weather_historical >> run_dbt_silver >> run_dbt_gold
 
 # Dependencias para DAG diario
 trigger_weather_daily >> run_dbt_daily

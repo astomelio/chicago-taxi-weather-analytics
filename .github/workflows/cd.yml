@@ -468,6 +468,39 @@ jobs:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
         continue-on-error: false
       
+      - name: Grant BigQuery permissions to Composer service account
+        run: |
+          PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          SA_EMAIL=$(echo '${{ secrets.GCP_SA_KEY }}' | jq -r '.client_email')
+          
+          echo "🔐 Otorgando permisos de BigQuery al service account de Composer..."
+          echo "   Service Account: $SA_EMAIL"
+          
+          # Otorgar roles necesarios para acceder a datasets públicos y crear tablas
+          for ROLE in "roles/bigquery.dataViewer" "roles/bigquery.dataEditor" "roles/bigquery.jobUser" "roles/bigquery.user"; do
+            echo "   Otorgando rol: $ROLE"
+            gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+              --member="serviceAccount:$SA_EMAIL" \
+              --role="$ROLE" \
+              --condition=None 2>&1 || echo "⚠️  Error otorgando $ROLE (puede que ya exista)"
+          done
+          
+          # Activar acceso al dataset público ejecutando una query simple
+          echo "🔓 Activando acceso al dataset público de BigQuery..."
+          echo "   Esto es necesario para que el service account pueda acceder a bigquery-public-data"
+          
+          bq query --use_legacy_sql=false \
+            --project_id="$PROJECT_ID" \
+            --location=us-central1 \
+            "SELECT 1 as test FROM \`bigquery-public-data.chicago_taxi_trips.taxi_trips\` LIMIT 1" \
+            2>&1 || echo "⚠️  Error ejecutando query de activación (puede que ya esté activado o requiera usuario)"
+          
+          echo "⏳ Esperando propagación de permisos (5 segundos)..."
+          sleep 5
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        continue-on-error: true
+      
       - name: Check if Composer environment exists
         id: check-composer
         run: |
