@@ -226,6 +226,7 @@ run_dbt_silver = BashOperator(
     cd /home/airflow/gcs/data/dbt && \
     export GCP_PROJECT_ID={{ var.value.GCP_PROJECT_ID }} && \
     export DBT_DATASET=chicago_taxi_silver && \
+    export GOOGLE_APPLICATION_CREDENTIALS={{ var.value.GCP_SA_KEY_PATH }} && \
     dbt run --models weather_silver --profiles-dir /home/airflow/gcs/data/dbt
     """,
     dag=historical_dag,
@@ -237,6 +238,7 @@ run_dbt_gold = BashOperator(
     cd /home/airflow/gcs/data/dbt && \
     export GCP_PROJECT_ID={{ var.value.GCP_PROJECT_ID }} && \
     export DBT_DATASET=chicago_taxi_silver && \
+    export GOOGLE_APPLICATION_CREDENTIALS={{ var.value.GCP_SA_KEY_PATH }} && \
     dbt run --models gold --profiles-dir /home/airflow/gcs/data/dbt
     """,
     dag=historical_dag,
@@ -256,6 +258,7 @@ run_dbt_daily = BashOperator(
     cd /home/airflow/gcs/data/dbt && \
     export GCP_PROJECT_ID={{ var.value.GCP_PROJECT_ID }} && \
     export DBT_DATASET=chicago_taxi_silver && \
+    export GOOGLE_APPLICATION_CREDENTIALS={{ var.value.GCP_SA_KEY_PATH }} && \
     dbt run --profiles-dir /home/airflow/gcs/data/dbt
     """,
     dag=daily_dag,

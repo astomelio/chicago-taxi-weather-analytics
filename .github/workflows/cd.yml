@@ -822,8 +822,36 @@ jobs:
           BUCKET=$(echo "$BUCKET_RAW" | sed 's|^gs://||')
           BUCKET_PATH="gs://$BUCKET"
           echo "📤 Subiendo dbt a Composer..."
-          gsutil -m cp -r dbt/* "$BUCKET_PATH/data/dbt/" || true
-          echo "✅ dbt subido"
+          
+          # Crear directorio temporal para dbt con profiles.yml correcto
+          TEMP_DBT_DIR=$(mktemp -d)
+          cp -r dbt/* "$TEMP_DBT_DIR/" 2>/dev/null || true
+          
+          # Crear profiles.yml para Airflow (usa service-account)
+          cat > "$TEMP_DBT_DIR/profiles.yml" << 'PROFEOF'
+chicago_taxi_analysis:
+  target: dev
+  outputs:
+    dev:
+      type: bigquery
+      method: service-account
+      keyfile: "/home/airflow/gcs/data/github-actions-key.json"
+      project: "{{ env_var('GCP_PROJECT_ID') }}"
+      dataset: "{{ env_var('DBT_DATASET', 'chicago_taxi_silver') }}"
+      location: us-central1
+      threads: 4
+      timeout_seconds: 300
+      priority: interactive
+      maximum_bytes_billed: 1000000000
+PROFEOF
+          
+          echo "📋 profiles.yml creado para Airflow (usa service-account)"
+          echo "   Keyfile: /home/airflow/gcs/data/github-actions-key.json"
+          
+          # Subir dbt con profiles.yml correcto
+          gsutil -m cp -r "$TEMP_DBT_DIR"/* "$BUCKET_PATH/data/dbt/" || true
+          rm -rf "$TEMP_DBT_DIR"
+          echo "✅ dbt subido con profiles.yml configurado para service-account"
         continue-on-error: true
       
       - name: Upload service account key to Composer
