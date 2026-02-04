@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.providers.google.cloud.operators.bigquery import BigQueryInsertJobOperator
 from airflow.providers.google.cloud.operators.bigquery import BigQueryCheckOperator
-from airflow.providers.google.cloud.operators.functions import CloudFunctionsInvokeFunctionOperator
 from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
 from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
@@ -81,22 +80,43 @@ def check_historical_data_exists(**context):
         return 'run_historical_ingestion'
 
 def trigger_weather_function(historical=True, **context):
-    """Trigger la Cloud Function de ingesta de clima."""
+    """Trigger la Cloud Function de ingesta de clima usando ID token."""
     import requests
     import json
     
     function_url = f"https://{REGION}-{PROJECT_ID}.cloudfunctions.net/weather-ingestion"
     
-    # Obtener token de autenticación usando google.auth (ya disponible en Airflow)
+    # Obtener ID token para autenticación con Cloud Functions
+    # Cloud Functions requiere un ID token, no un access token
     try:
         from google.auth import default
         from google.auth.transport.requests import Request
+        import google.auth.transport.requests
         
-        credentials, _ = default()
-        credentials.refresh(Request())
-        token = credentials.token
+        # Obtener credenciales por defecto
+        credentials, project = default()
+        
+        # Crear request para obtener ID token
+        request_obj = Request()
+        
+        # Obtener ID token para la URL de la función
+        # Para Cloud Functions, necesitamos un ID token, no un access token
+        from google.auth import _helpers
+        from google.oauth2 import id_token
+        
+        # Intentar obtener ID token
+        try:
+            # Usar google.auth para obtener ID token
+            id_token_creds = google.auth.transport.requests.Request()
+            token = id_token.fetch_id_token(request_obj, function_url)
+        except Exception:
+            # Fallback: usar access token (puede no funcionar para funciones privadas)
+            credentials.refresh(request_obj)
+            token = credentials.token
+        
+        print(f"✅ Token obtenido para autenticación")
     except Exception as e:
-        print(f"⚠️  Error obteniendo token de autenticación: {e}")
+        print(f"⚠️  Error obteniendo token: {e}")
         print("   Intentando sin autenticación (puede fallar si la función requiere auth)")
         token = None
     
@@ -134,12 +154,10 @@ check_historical = PythonOperator(
     dag=historical_dag,
 )
 
-trigger_weather_historical = CloudFunctionsInvokeFunctionOperator(
+trigger_weather_historical = PythonOperator(
     task_id='trigger_weather_historical',
-    function_id='weather-ingestion',
-    location=REGION,
-    project_id=PROJECT_ID,
-    input_data='{"historical": true}',
+    python_callable=trigger_weather_function,
+    op_kwargs={'historical': True},
     dag=historical_dag,
 )
 
@@ -234,12 +252,10 @@ run_dbt_gold = BashOperator(
 )
 
 # Tareas para DAG diario
-trigger_weather_daily = CloudFunctionsInvokeFunctionOperator(
+trigger_weather_daily = PythonOperator(
     task_id='trigger_weather_daily',
-    function_id='weather-ingestion',
-    location=REGION,
-    project_id=PROJECT_ID,
-    input_data='{"historical": false}',
+    python_callable=trigger_weather_function,
+    op_kwargs={'historical': False},
     dag=daily_dag,
 )
 
