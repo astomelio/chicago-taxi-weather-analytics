@@ -142,11 +142,58 @@ def trigger_weather_function(historical=True, **context):
         print(f"❌ Error inesperado: {e}")
         raise
 
-# Crear vista taxi_trips_raw si no existe (para acceso a dataset público)
-# NOTA: La tarea create_taxi_trips_raw_view fue eliminada porque:
-# 1. El service account de Composer no tiene permisos para acceder al dataset público directamente
-# 2. Ya no es necesaria: load_historical_taxi_data carga los datos directamente a taxi_trips_raw_table
-# 3. dbt lee de taxi_trips_raw_table, no de la vista ni del dataset público
+# Activar acceso al dataset público (ejecuta query simple para activar)
+def activate_public_dataset_access(**context):
+    """
+    Activa el acceso al dataset público ejecutando una query simple.
+    BigQuery requiere que se ejecute una query contra un dataset público
+    para activar el acceso para el proyecto.
+    """
+    from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
+    from google.cloud import bigquery
+    
+    hook = BigQueryHook(project_id=PROJECT_ID, location=REGION)
+    client = hook.get_client()
+    
+    # Query muy simple solo para activar el acceso
+    activation_query = """
+    SELECT COUNT(*) as test
+    FROM `bigquery-public-data.chicago_taxi_trips.taxi_trips`
+    WHERE DATE(trip_start_timestamp) >= '2023-06-01'
+      AND DATE(trip_start_timestamp) <= '2023-12-31'
+    LIMIT 1
+    """
+    
+    try:
+        print(f"🔓 Activando acceso al dataset público de BigQuery...")
+        print(f"   Esto es necesario para que el service account pueda acceder")
+        job_config = bigquery.QueryJobConfig(use_legacy_sql=False)
+        query_job = client.query(activation_query, job_config=job_config, location=REGION)
+        result = query_job.result()
+        row = next(result)
+        print(f"✅ Acceso al dataset público activado. Resultado: {row.test}")
+        return True
+    except Exception as e:
+        error_msg = str(e)
+        if "Access Denied" in error_msg or "permission" in error_msg.lower() or "403" in error_msg:
+            print(f"⚠️  No se pudo activar el acceso automáticamente: {error_msg}")
+            print(f"   El service account de Composer necesita que un usuario ejecute")
+            print(f"   una query contra el dataset público primero para activar el acceso.")
+            print(f"   Esto ya debería estar hecho si ejecutaste la query desde BigQuery Console.")
+            print(f"   Continuando de todas formas...")
+            # No hacer raise - continuar y ver si funciona
+            return False
+        else:
+            print(f"⚠️  Error inesperado activando acceso: {e}")
+            # No hacer raise - continuar
+            return False
+
+activate_access = PythonOperator(
+    task_id='activate_public_dataset_access',
+    python_callable=activate_public_dataset_access,
+    pool=None,
+    dag=historical_dag,
+)
 
 # Cargar datos históricos de taxis a una tabla (no solo vista)
 def load_historical_taxi_data(**context):
@@ -172,11 +219,14 @@ def load_historical_taxi_data(**context):
         
         if row_count > 0:
             print(f"✅ Tabla taxi_trips_raw_table ya existe con {row_count:,} registros. Saltando carga.")
+            print(f"   Los datos ya fueron cargados manualmente o en una ejecución anterior.")
             return
         else:
-            print(f"⚠️  Tabla existe pero está vacía. Cargando datos...")
+            print(f"⚠️  Tabla existe pero está vacía.")
+            print(f"   Intentando cargar datos desde el dataset público...")
     except NotFound:
-        print(f"📋 Tabla taxi_trips_raw_table no existe. Creándola y cargando datos...")
+        print(f"📋 Tabla taxi_trips_raw_table no existe.")
+        print(f"   Intentando crear y cargar datos desde el dataset público...")
     except Exception as e:
         print(f"⚠️  Error verificando tabla: {e}")
         print("   Intentando crear de todas formas...")
@@ -241,9 +291,11 @@ def load_historical_taxi_data(**context):
             print(f"❌ ERROR DE PERMISOS: No se puede acceder al dataset público de BigQuery")
             print(f"")
             print(f"═══════════════════════════════════════════════════════════════════════")
-            print(f"   SOLUCIÓN REQUERIDA:")
+            print(f"   SOLUCIÓN REQUERIDA (2 OPCIONES):")
             print(f"═══════════════════════════════════════════════════════════════════════")
             print(f"")
+            print(f"   OPCIÓN 1: Activar acceso y dejar que el DAG cargue los datos")
+            print(f"   ─────────────────────────────────────────────────────────────")
             print(f"   1. Ve a BigQuery Console:")
             print(f"      https://console.cloud.google.com/bigquery?project={PROJECT_ID}")
             print(f"")
@@ -256,6 +308,23 @@ def load_historical_taxi_data(**context):
             print(f"   3. Esto activará el acceso al dataset público para todo el proyecto")
             print(f"")
             print(f"   4. Una vez activado, vuelve a ejecutar este DAG")
+            print(f"")
+            print(f"   OPCIÓN 2: Cargar datos manualmente (RECOMENDADO si OPCIÓN 1 no funciona)")
+            print(f"   ─────────────────────────────────────────────────────────────")
+            print(f"   1. Ve a BigQuery Console:")
+            print(f"      https://console.cloud.google.com/bigquery?project={PROJECT_ID}")
+            print(f"")
+            print(f"   2. Ejecuta los scripts SQL en este orden:")
+            print(f"      a) scripts/query_crear_tabla_vacia.sql")
+            print(f"      b) scripts/query_insert_junio.sql")
+            print(f"      c) scripts/query_insert_julio_diciembre.sql (mes por mes)")
+            print(f"")
+            print(f"   3. Verifica que la tabla tenga datos:")
+            print(f"      SELECT COUNT(*) FROM `{PROJECT_ID}.chicago_taxi_raw.taxi_trips_raw_table`")
+            print(f"      (Deberías ver ~6,931,127 registros)")
+            print(f"")
+            print(f"   4. Una vez cargados, vuelve a ejecutar este DAG")
+            print(f"      (El DAG detectará que los datos ya existen y continuará)")
             print(f"")
             print(f"═══════════════════════════════════════════════════════════════════════")
             print(f"")
@@ -360,12 +429,13 @@ run_dbt_daily = BashOperator(
 )
 
 # Dependencias para DAG histórico
-# 1. Cargar datos históricos de taxis a tabla propia (lee del dataset público)
-# 2. Verificar datos históricos de clima
-# 3. Cargar datos históricos de clima
-# 4. Ejecutar dbt silver (lee de taxi_trips_raw_table, no del dataset público)
-# 5. Ejecutar dbt gold
-load_historical_taxi >> check_historical >> trigger_weather_historical >> run_dbt_silver >> run_dbt_gold
+# 1. Activar acceso al dataset público (intenta activar si no está activado)
+# 2. Cargar datos históricos de taxis a tabla propia (lee del dataset público)
+# 3. Verificar datos históricos de clima
+# 4. Cargar datos históricos de clima
+# 5. Ejecutar dbt silver (lee de taxi_trips_raw_table, no del dataset público)
+# 6. Ejecutar dbt gold
+activate_access >> load_historical_taxi >> check_historical >> trigger_weather_historical >> run_dbt_silver >> run_dbt_gold
 
 # Dependencias para DAG diario
 trigger_weather_daily >> run_dbt_daily
