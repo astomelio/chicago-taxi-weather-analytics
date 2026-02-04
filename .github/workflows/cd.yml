@@ -828,22 +828,23 @@ jobs:
           cp -r dbt/* "$TEMP_DBT_DIR/" 2>/dev/null || true
           
           # Crear profiles.yml para Airflow (usa service-account)
-          cat > "$TEMP_DBT_DIR/profiles.yml" << 'PROFEOF'
-chicago_taxi_analysis:
-  target: dev
-  outputs:
-    dev:
-      type: bigquery
-      method: service-account
-      keyfile: "/home/airflow/gcs/data/github-actions-key.json"
-      project: "{{ env_var('GCP_PROJECT_ID') }}"
-      dataset: "{{ env_var('DBT_DATASET', 'chicago_taxi_silver') }}"
-      location: us-central1
-      threads: 4
-      timeout_seconds: 300
-      priority: interactive
-      maximum_bytes_billed: 1000000000
-PROFEOF
+          # Usar printf para evitar problemas con {{ }} en YAML
+          printf '%s\n' \
+            'chicago_taxi_analysis:' \
+            '  target: dev' \
+            '  outputs:' \
+            '    dev:' \
+            '      type: bigquery' \
+            '      method: service-account' \
+            '      keyfile: "/home/airflow/gcs/data/github-actions-key.json"' \
+            '      project: "{{ env_var('\''GCP_PROJECT_ID'\'') }}"' \
+            '      dataset: "{{ env_var('\''DBT_DATASET'\'', '\''chicago_taxi_silver'\'') }}"' \
+            '      location: us-central1' \
+            '      threads: 4' \
+            '      timeout_seconds: 300' \
+            '      priority: interactive' \
+            '      maximum_bytes_billed: 1000000000' \
+            > "$TEMP_DBT_DIR/profiles.yml"
           
           echo "📋 profiles.yml creado para Airflow (usa service-account)"
           echo "   Keyfile: /home/airflow/gcs/data/github-actions-key.json"
