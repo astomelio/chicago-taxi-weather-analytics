@@ -721,44 +721,39 @@ jobs:
       - name: Determine if uploads are needed
         id: should-upload
         run: |
-          # Subir archivos si:
-          # 1. Composer se acaba de crear (no existía antes), O
-          # 2. Hay cambios en archivos de Airflow o dbt, O
-          # 3. Es una ejecución manual (workflow_dispatch), O
-          # 4. Composer existe pero no hay DAGs (primera vez que está listo)
-          COMPOSER_WAS_CREATED="${{ steps.check-composer.outputs.exists != 'true' }}"
+          # Subir archivos SIEMPRE cuando:
+          # 1. Composer está listo (bucket disponible), Y
+          # 2. Es ejecución manual, O hay cambios, O Composer existe (para asegurar que los DAGs estén)
           COMPOSER_EXISTS="${{ steps.check-composer.outputs.exists == 'true' }}"
           AIRFLOW_CHANGED="${{ steps.changes.outputs.airflow == 'true' }}"
           DBT_CHANGED="${{ steps.changes.outputs.dbt == 'true' }}"
           CONFIG_CHANGED="${{ steps.changes.outputs.airflow_config == 'true' }}"
           IS_MANUAL="${{ github.event_name == 'workflow_dispatch' }}"
           
-          # En ejecución manual, siempre subir si hay bucket disponible
+          echo "🔍 Evaluando si se deben subir archivos:"
+          echo "   - Composer existe: $COMPOSER_EXISTS"
+          echo "   - Cambios en Airflow: $AIRFLOW_CHANGED"
+          echo "   - Cambios en dbt: $DBT_CHANGED"
+          echo "   - Cambios en config: $CONFIG_CHANGED"
+          echo "   - Ejecución manual: $IS_MANUAL"
+          echo ""
+          
+          # Si es ejecución manual, SIEMPRE subir
           if [ "$IS_MANUAL" == "true" ]; then
-            echo "✅ Ejecución manual detectada - se actualizarán los archivos"
+            echo "✅ Ejecución manual - se actualizarán los archivos"
             echo "upload=true" >> $GITHUB_OUTPUT
-          elif [ "$COMPOSER_WAS_CREATED" == "true" ]; then
-            echo "✅ Composer recién creado - se subirán los archivos"
-            echo "upload=true" >> $GITHUB_OUTPUT
+          # Si Composer existe, SIEMPRE subir (para asegurar que los DAGs estén presentes)
           elif [ "$COMPOSER_EXISTS" == "true" ]; then
-            # Si Composer existe, verificar si hay DAGs
-            # Si no hay cambios pero Composer existe, subir de todas formas (puede ser primera vez)
-            echo "✅ Composer existe - verificando si necesitamos subir archivos"
-            echo "   - Cambios en Airflow: $AIRFLOW_CHANGED"
-            echo "   - Cambios en dbt: $DBT_CHANGED"
-            echo "   - Cambios en config: $CONFIG_CHANGED"
-            # Subir si hay cambios O si es la primera vez (forzar subida)
-            if [ "$AIRFLOW_CHANGED" == "true" ] || \
+            echo "✅ Composer existe - subiendo archivos para asegurar que los DAGs estén presentes"
+            echo "upload=true" >> $GITHUB_OUTPUT
+          # Si hay cambios, subir
+          elif [ "$AIRFLOW_CHANGED" == "true" ] || \
                [ "$DBT_CHANGED" == "true" ] || \
                [ "$CONFIG_CHANGED" == "true" ]; then
-              echo "upload=true" >> $GITHUB_OUTPUT
-            else
-              # Forzar subida la primera vez que Composer está listo
-              echo "⚠️  No se detectaron cambios, pero forzando subida para asegurar que los DAGs estén presentes"
-              echo "upload=true" >> $GITHUB_OUTPUT
-            fi
+            echo "✅ Cambios detectados - se actualizarán los archivos"
+            echo "upload=true" >> $GITHUB_OUTPUT
           else
-            echo "⏭️  Composer no existe aún. Saltando actualización."
+            echo "⏭️  No se cumplen condiciones para subir archivos"
             echo "upload=false" >> $GITHUB_OUTPUT
           fi
       
@@ -767,12 +762,51 @@ jobs:
         run: |
           BUCKET="${{ steps.get-bucket.outputs.bucket }}"
           echo "📤 Subiendo DAGs a Composer..."
-          gsutil -m cp -r airflow/dags/*.py "gs://$BUCKET/dags/" || true
-          if [ -f "airflow/dags/requirements.txt" ]; then
-            gsutil cp airflow/dags/requirements.txt "gs://$BUCKET/data/requirements.txt" || true
+          echo "   Bucket: $BUCKET"
+          echo "   Destino: gs://$BUCKET/dags/"
+          echo ""
+          
+          # Verificar que los archivos existen
+          if [ ! -d "airflow/dags" ]; then
+            echo "❌ ERROR: Directorio airflow/dags no existe"
+            exit 1
           fi
-          echo "✅ DAGs subidos"
-        continue-on-error: true
+          
+          # Listar archivos que se van a subir
+          echo "📋 Archivos DAG encontrados:"
+          ls -la airflow/dags/*.py || echo "⚠️  No se encontraron archivos .py"
+          echo ""
+          
+          # Subir cada archivo .py individualmente para mejor control
+          for dag_file in airflow/dags/*.py; do
+            if [ -f "$dag_file" ]; then
+              filename=$(basename "$dag_file")
+              echo "📤 Subiendo $filename..."
+              gsutil cp "$dag_file" "gs://$BUCKET/dags/$filename"
+              if [ $? -eq 0 ]; then
+                echo "   ✅ $filename subido correctamente"
+              else
+                echo "   ❌ Error subiendo $filename"
+                exit 1
+              fi
+            fi
+          done
+          
+          # Subir requirements.txt si existe
+          if [ -f "airflow/dags/requirements.txt" ]; then
+            echo "📤 Subiendo requirements.txt..."
+            gsutil cp airflow/dags/requirements.txt "gs://$BUCKET/data/requirements.txt"
+            echo "   ✅ requirements.txt subido"
+          fi
+          
+          echo ""
+          echo "✅ Todos los DAGs subidos correctamente"
+          
+          # Verificar que se subieron
+          echo ""
+          echo "🔍 Verificando DAGs en el bucket:"
+          gsutil ls "gs://$BUCKET/dags/*.py" || echo "⚠️  No se encontraron DAGs en el bucket"
+        continue-on-error: false
       
       - name: Upload dbt to Composer
         if: steps.get-bucket.outputs.bucket != '' && steps.should-upload.outputs.upload == 'true'
