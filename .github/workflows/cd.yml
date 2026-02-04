@@ -883,6 +883,49 @@ jobs:
           GCP_REGION: ${{ secrets.GCP_REGION || 'us-central1' }}
         continue-on-error: true
       
+      - name: Wait for DAGs to be parsed by Airflow
+        if: steps.get-bucket.outputs.bucket != '' && steps.should-upload.outputs.upload == 'true'
+        run: |
+          PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          REGION="${{ secrets.GCP_REGION || 'us-central1' }}"
+          COMPOSER_ENV="chicago-taxi-composer"
+          
+          echo "⏳ Esperando 60 segundos para que Airflow parsee los DAGs..."
+          sleep 60
+          
+          echo "✅ Tiempo de espera completado"
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ secrets.GCP_REGION || 'us-central1' }}
+        continue-on-error: true
+      
+      - name: Unpause daily DAG and trigger historical DAG
+        if: steps.get-bucket.outputs.bucket != '' && steps.should-upload.outputs.upload == 'true'
+        run: |
+          PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          REGION="${{ secrets.GCP_REGION || 'us-central1' }}"
+          COMPOSER_ENV="chicago-taxi-composer"
+          
+          echo "🚀 Activando y ejecutando DAGs..."
+          
+          # Unpause el DAG diario para que se ejecute automáticamente
+          echo "📅 Activando DAG diario (chicago_taxi_daily_pipeline)..."
+          gcloud composer environments run "$COMPOSER_ENV" \
+            --location "$REGION" \
+            dags unpause chicago_taxi_daily_pipeline 2>&1 || echo "⚠️  Error activando DAG diario (puede que ya esté activo)"
+          
+          # Trigger el DAG histórico (solo una vez)
+          echo "📊 Ejecutando DAG histórico (chicago_taxi_historical_ingestion)..."
+          gcloud composer environments run "$COMPOSER_ENV" \
+            --location "$REGION" \
+            dags trigger chicago_taxi_historical_ingestion 2>&1 || echo "⚠️  Error ejecutando DAG histórico (puede que ya esté corriendo)"
+          
+          echo "✅ DAGs configurados y ejecutados"
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ secrets.GCP_REGION || 'us-central1' }}
+        continue-on-error: true
+      
       - name: Airflow setup summary
         run: |
           PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
