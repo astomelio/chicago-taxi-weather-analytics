@@ -827,7 +827,8 @@ jobs:
           TEMP_DBT_DIR=$(mktemp -d)
           cp -r dbt/* "$TEMP_DBT_DIR/" 2>/dev/null || true
           
-          # Crear profiles.yml para Airflow (usa service-account)
+          # Crear profiles.yml para Airflow (usa oauth para acceder a datasets públicos)
+          # Usar Application Default Credentials (ADC) de Airflow para acceder a datasets públicos
           # Usar printf para evitar problemas con {{ }} en YAML
           printf '%s\n' \
             'chicago_taxi_analysis:' \
@@ -835,8 +836,7 @@ jobs:
             '  outputs:' \
             '    dev:' \
             '      type: bigquery' \
-            '      method: service-account' \
-            '      keyfile: "/home/airflow/gcs/data/github-actions-key.json"' \
+            '      method: oauth' \
             '      project: "{{ env_var('\''GCP_PROJECT_ID'\'') }}"' \
             '      dataset: "{{ env_var('\''DBT_DATASET'\'', '\''chicago_taxi_silver'\'') }}"' \
             '      location: us-central1' \
@@ -846,8 +846,8 @@ jobs:
             '      maximum_bytes_billed: 1000000000' \
             > "$TEMP_DBT_DIR/profiles.yml"
           
-          echo "📋 profiles.yml creado para Airflow (usa service-account)"
-          echo "   Keyfile: /home/airflow/gcs/data/github-actions-key.json"
+          echo "📋 profiles.yml creado para Airflow (usa oauth/ADC para acceder a datasets públicos)"
+          echo "   Método: oauth (usa credenciales por defecto de Airflow)"
           
           # Subir dbt con profiles.yml correcto
           gsutil -m cp -r "$TEMP_DBT_DIR"/* "$BUCKET_PATH/data/dbt/" || true

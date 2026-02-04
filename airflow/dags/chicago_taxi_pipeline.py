@@ -163,18 +163,17 @@ run_dbt_silver = BashOperator(
     cd /home/airflow/gcs/data/dbt && \
     export GCP_PROJECT_ID='{{ params.project_id }}' && \
     export DBT_DATASET=chicago_taxi_silver && \
-    export GOOGLE_APPLICATION_CREDENTIALS='{{ params.sa_key_path }}' && \
+    # NO usar GOOGLE_APPLICATION_CREDENTIALS - usar ADC de Airflow (oauth)
+    # Esto permite acceder a datasets públicos de BigQuery
+    unset GOOGLE_APPLICATION_CREDENTIALS || true && \
     # Verificar que dbt esté instalado, si no, instalarlo
     python3 -m pip install --user dbt-bigquery 2>/dev/null || echo "dbt ya instalado o error en instalación" && \
-    # Verificar credenciales
-    echo "🔍 Verificando credenciales..." && \
-    ls -la $GOOGLE_APPLICATION_CREDENTIALS || echo "⚠️  Service account key no encontrado" && \
     # Ejecutar dbt para crear taxi_trips_silver y weather_silver
-    dbt run --models silver --profiles-dir /home/airflow/gcs/data/dbt
+    # Usa oauth (Application Default Credentials) para acceder a datasets públicos
+    dbt run --select silver --profiles-dir /home/airflow/gcs/data/dbt
     """,
     params={
         'project_id': PROJECT_ID,
-        'sa_key_path': '/home/airflow/gcs/data/github-actions-key.json'
     },
     pool=None,  # No usar pool
     dag=historical_dag,
@@ -186,15 +185,15 @@ run_dbt_gold = BashOperator(
     cd /home/airflow/gcs/data/dbt && \
     export GCP_PROJECT_ID='{{ params.project_id }}' && \
     export DBT_DATASET=chicago_taxi_silver && \
-    export GOOGLE_APPLICATION_CREDENTIALS='{{ params.sa_key_path }}' && \
+    # NO usar GOOGLE_APPLICATION_CREDENTIALS - usar ADC de Airflow (oauth)
+    unset GOOGLE_APPLICATION_CREDENTIALS || true && \
     # Verificar que dbt esté instalado, si no, instalarlo
     python3 -m pip install --user dbt-bigquery 2>/dev/null || echo "dbt ya instalado o error en instalación" && \
     # Ejecutar dbt
-    dbt run --models gold --profiles-dir /home/airflow/gcs/data/dbt
+    dbt run --select gold --profiles-dir /home/airflow/gcs/data/dbt
     """,
     params={
         'project_id': PROJECT_ID,
-        'sa_key_path': '/home/airflow/gcs/data/github-actions-key.json'
     },
     pool=None,  # No usar pool
     dag=historical_dag,
@@ -214,7 +213,8 @@ run_dbt_daily = BashOperator(
     cd /home/airflow/gcs/data/dbt && \
     export GCP_PROJECT_ID='{{ params.project_id }}' && \
     export DBT_DATASET=chicago_taxi_silver && \
-    export GOOGLE_APPLICATION_CREDENTIALS='{{ params.sa_key_path }}' && \
+    # NO usar GOOGLE_APPLICATION_CREDENTIALS - usar ADC de Airflow (oauth)
+    unset GOOGLE_APPLICATION_CREDENTIALS || true && \
     # Verificar que dbt esté instalado, si no, instalarlo
     python3 -m pip install --user dbt-bigquery 2>/dev/null || echo "dbt ya instalado o error en instalación" && \
     # Ejecutar dbt
@@ -222,7 +222,6 @@ run_dbt_daily = BashOperator(
     """,
     params={
         'project_id': PROJECT_ID,
-        'sa_key_path': '/home/airflow/gcs/data/github-actions-key.json'
     },
     dag=daily_dag,
 )
