@@ -201,6 +201,21 @@ def load_historical_taxi_data(**context):
     from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
     from google.cloud import bigquery
     from google.cloud.exceptions import NotFound
+    import google.auth
+    
+    # DIAGNÓSTICO: Verificar qué identidad está usando realmente
+    try:
+        credentials, project = google.auth.default()
+        if hasattr(credentials, 'service_account_email'):
+            identity = credentials.service_account_email
+        elif hasattr(credentials, 'client_email'):
+            identity = credentials.client_email
+        else:
+            identity = str(type(credentials))
+        print(f"🔍 Identidad que está usando Airflow: {identity}")
+        print(f"   Proyecto: {project}")
+    except Exception as e:
+        print(f"⚠️  No se pudo determinar la identidad: {e}")
     
     hook = BigQueryHook(project_id=PROJECT_ID, location=REGION)
     client = hook.get_client()
