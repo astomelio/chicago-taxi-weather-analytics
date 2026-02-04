@@ -13,11 +13,7 @@
 
 WITH raw_trips AS (
   SELECT *
-  FROM `{{ env_var('GCP_PROJECT_ID') }}.chicago_taxi_raw.taxi_trips_raw`
-  WHERE trip_start_timestamp IS NOT NULL
-    AND trip_seconds IS NOT NULL
-    AND trip_seconds > 0
-    AND trip_miles >= 0
+  FROM `{{ env_var('GCP_PROJECT_ID') }}.chicago_taxi_raw.taxi_trips_raw_table`
 ),
 
 -- Eliminar duplicados basándose en unique_key

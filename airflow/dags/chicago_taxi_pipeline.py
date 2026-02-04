@@ -234,6 +234,100 @@ create_view = PythonOperator(
     dag=historical_dag,
 )
 
+# Cargar datos históricos de taxis a una tabla (no solo vista)
+def load_historical_taxi_data(**context):
+    """Carga datos históricos de taxis del dataset público a una tabla propia."""
+    from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
+    from google.cloud import bigquery
+    from google.cloud.exceptions import NotFound
+    
+    hook = BigQueryHook(project_id=PROJECT_ID, location=REGION)
+    client = hook.get_client()
+    
+    # Verificar si la tabla ya existe y tiene datos
+    dataset_ref = client.dataset('chicago_taxi_raw', project=PROJECT_ID)
+    table_ref = dataset_ref.table('taxi_trips_raw_table')
+    
+    try:
+        table = client.get_table(table_ref)
+        # Verificar si tiene datos
+        count_query = f"SELECT COUNT(*) as cnt FROM `{PROJECT_ID}.chicago_taxi_raw.taxi_trips_raw_table`"
+        count_job = client.query(count_query, location=REGION)
+        count_result = count_job.result()
+        row_count = next(count_result).cnt
+        
+        if row_count > 0:
+            print(f"✅ Tabla taxi_trips_raw_table ya existe con {row_count:,} registros. Saltando carga.")
+            return
+        else:
+            print(f"⚠️  Tabla existe pero está vacía. Cargando datos...")
+    except NotFound:
+        print(f"📋 Tabla taxi_trips_raw_table no existe. Creándola y cargando datos...")
+    except Exception as e:
+        print(f"⚠️  Error verificando tabla: {e}")
+        print("   Intentando crear de todas formas...")
+    
+    # Crear tabla y cargar datos históricos
+    # Usar CREATE TABLE AS SELECT para cargar los datos
+    load_query = f"""
+    CREATE OR REPLACE TABLE `{PROJECT_ID}.chicago_taxi_raw.taxi_trips_raw_table`
+    PARTITION BY DATE(trip_start_timestamp)
+    CLUSTER BY trip_start_timestamp AS
+    SELECT 
+      unique_key,
+      taxi_id,
+      trip_start_timestamp,
+      trip_end_timestamp,
+      trip_seconds,
+      trip_miles,
+      pickup_census_tract,
+      dropoff_census_tract,
+      pickup_community_area,
+      dropoff_community_area,
+      fare,
+      tips,
+      tolls,
+      extras,
+      trip_total,
+      payment_type,
+      company,
+      pickup_latitude,
+      pickup_longitude,
+      dropoff_latitude,
+      dropoff_longitude
+    FROM `bigquery-public-data.chicago_taxi_trips.taxi_trips`
+    WHERE DATE(trip_start_timestamp) >= '2023-06-01'
+      AND DATE(trip_start_timestamp) <= '2023-12-31'
+      AND trip_start_timestamp IS NOT NULL
+      AND trip_seconds IS NOT NULL
+      AND trip_seconds > 0
+      AND trip_miles >= 0
+    """
+    
+    try:
+        print(f"🔄 Cargando datos históricos de taxis (esto puede tardar 10-20 minutos)...")
+        job_config = bigquery.QueryJobConfig(use_legacy_sql=False, priority='BATCH')
+        query_job = client.query(load_query, job_config=job_config, location=REGION)
+        query_job.result()  # Esperar a que termine
+        
+        # Verificar que se cargó correctamente
+        count_query = f"SELECT COUNT(*) as cnt FROM `{PROJECT_ID}.chicago_taxi_raw.taxi_trips_raw_table`"
+        count_job = client.query(count_query, location=REGION)
+        count_result = count_job.result()
+        row_count = next(count_result).cnt
+        print(f"✅ Datos históricos de taxis cargados exitosamente: {row_count:,} registros")
+        
+    except Exception as e:
+        print(f"❌ Error cargando datos históricos: {e}")
+        raise
+
+load_historical_taxi = PythonOperator(
+    task_id='load_historical_taxi_data',
+    python_callable=load_historical_taxi_data,
+    pool=None,
+    dag=historical_dag,
+)
+
 # Tareas para DAG histórico
 check_historical = PythonOperator(
     task_id='check_historical_data',
@@ -320,8 +414,13 @@ run_dbt_daily = BashOperator(
 )
 
 # Dependencias para DAG histórico
-# Crear vista primero, luego verificar datos históricos, luego el resto
-create_view >> check_historical >> trigger_weather_historical >> run_dbt_silver >> run_dbt_gold
+# 1. Crear vista (para compatibilidad)
+# 2. Cargar datos históricos de taxis a tabla propia
+# 3. Verificar datos históricos de clima
+# 4. Cargar datos históricos de clima
+# 5. Ejecutar dbt silver (lee de la tabla, no del dataset público)
+# 6. Ejecutar dbt gold
+create_view >> load_historical_taxi >> check_historical >> trigger_weather_historical >> run_dbt_silver >> run_dbt_gold
 
 # Dependencias para DAG diario
 trigger_weather_daily >> run_dbt_daily
