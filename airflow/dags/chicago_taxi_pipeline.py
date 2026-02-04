@@ -183,10 +183,11 @@ def load_historical_taxi_data(**context):
     
     # Crear tabla y cargar datos históricos
     # Usar CREATE TABLE AS SELECT para cargar los datos
+    # NOTA: Sin CLUSTER BY para evitar problemas de sintaxis
     load_query = f"""
     CREATE OR REPLACE TABLE `{PROJECT_ID}.chicago_taxi_raw.taxi_trips_raw_table`
     PARTITION BY DATE(trip_start_timestamp)
-    CLUSTER BY trip_start_timestamp AS
+    AS
     SELECT 
       unique_key,
       taxi_id,
@@ -220,6 +221,7 @@ def load_historical_taxi_data(**context):
     
     try:
         print(f"🔄 Cargando datos históricos de taxis (esto puede tardar 10-20 minutos)...")
+        print(f"   Esto requiere acceso al dataset público: bigquery-public-data.chicago_taxi_trips.taxi_trips")
         job_config = bigquery.QueryJobConfig(use_legacy_sql=False, priority='BATCH')
         query_job = client.query(load_query, job_config=job_config, location=REGION)
         query_job.result()  # Esperar a que termine
@@ -232,8 +234,38 @@ def load_historical_taxi_data(**context):
         print(f"✅ Datos históricos de taxis cargados exitosamente: {row_count:,} registros")
         
     except Exception as e:
-        print(f"❌ Error cargando datos históricos: {e}")
-        raise
+        error_msg = str(e)
+        # Verificar si es un error de permisos
+        if "Access Denied" in error_msg or "permission" in error_msg.lower() or "403" in error_msg:
+            print(f"")
+            print(f"❌ ERROR DE PERMISOS: No se puede acceder al dataset público de BigQuery")
+            print(f"")
+            print(f"═══════════════════════════════════════════════════════════════════════")
+            print(f"   SOLUCIÓN REQUERIDA:")
+            print(f"═══════════════════════════════════════════════════════════════════════")
+            print(f"")
+            print(f"   1. Ve a BigQuery Console:")
+            print(f"      https://console.cloud.google.com/bigquery?project={PROJECT_ID}")
+            print(f"")
+            print(f"   2. Ejecuta esta query (con tu usuario, NO service account):")
+            print(f"      SELECT COUNT(*) as test")
+            print(f"      FROM `bigquery-public-data.chicago_taxi_trips.taxi_trips`")
+            print(f"      WHERE DATE(trip_start_timestamp) >= '2023-06-01'")
+            print(f"        AND DATE(trip_start_timestamp) <= '2023-12-31'")
+            print(f"")
+            print(f"   3. Esto activará el acceso al dataset público para todo el proyecto")
+            print(f"")
+            print(f"   4. Una vez activado, vuelve a ejecutar este DAG")
+            print(f"")
+            print(f"═══════════════════════════════════════════════════════════════════════")
+            print(f"")
+            print(f"   Detalles del error: {error_msg[:200]}")
+            print(f"")
+            # Hacer raise para que el DAG falle y se notifique
+            raise Exception(f"Permisos insuficientes para acceder al dataset público. Ver instrucciones arriba.")
+        else:
+            print(f"❌ Error cargando datos históricos: {e}")
+            raise
 
 load_historical_taxi = PythonOperator(
     task_id='load_historical_taxi_data',

@@ -85,10 +85,25 @@ Este proyecto analiza la relación entre las condiciones climáticas y la duraci
    - ✅ Configura variables de Airflow
    - ✅ **TODO queda listo para usar**
 
-4. **Último paso manual (una vez)**:
+4. **Cargar datos históricos (una vez)**:
+   
+   **Opción A: Desde Airflow (Recomendado)**
    - Ve a Airflow UI (el link aparece en los logs de GitHub Actions)
    - Trigger el DAG `chicago_taxi_historical_ingestion`
-   - El pipeline diario se ejecutará automáticamente después
+   - Espera a que complete (puede tardar 20-30 minutos)
+   
+   **Opción B: Desde BigQuery Console (Más Fácil)**
+   - Ve a: https://console.cloud.google.com/bigquery?project=tu-project-id
+   - Ejecuta la query del archivo `scripts/CARGAR_DATOS_HISTORICOS.md`
+   - Ver instrucciones completas en ese archivo
+   
+   **Opción C: Script directo (Si tienes gcloud/bq instalado)**
+   ```bash
+   export GCP_PROJECT_ID="tu-project-id"
+   ./scripts/load_historical_data.sh
+   ```
+   
+   El pipeline diario se ejecutará automáticamente después de cargar los históricos
 
 📖 **Guía completa de Airflow**: Ver [airflow/README.md](airflow/README.md)
 
