@@ -513,13 +513,13 @@ jobs:
           
           # Ejecutar el comando y capturar output y exit code
           # Usar temporal file para asegurar que capturamos todo el output
+          # NOTA: Composer 2.x no acepta --machine-type, --disk-size, ni --python-version
           TEMP_OUTPUT=$(mktemp)
           set +e  # Desactivar error estricto temporalmente
           gcloud composer environments create "$COMPOSER_ENV" \
             --location "$REGION" \
             --project "$PROJECT_ID" \
             --image-version composer-2.4.0-airflow-2.5.0 \
-            --machine-type n1-standard-2 \
             --node-count 3 \
             --async > "$TEMP_OUTPUT" 2>&1
           CREATE_EXIT=$?
