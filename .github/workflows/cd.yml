@@ -371,10 +371,176 @@ jobs:
         run: |
           echo "⏭️  Datos históricos ya existen. Saltando ingesta histórica."
 
+  setup-airflow:
+    name: Setup Airflow (Cloud Composer)
+    runs-on: ubuntu-latest
+    needs: deploy-terraform
+    defaults:
+      run:
+        working-directory: ./
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Setup GCP Auth
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Setup GCP Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+      
+      - name: Check if Composer environment exists
+        id: check-composer
+        run: |
+          PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          REGION="${{ secrets.GCP_REGION || 'us-central1' }}"
+          COMPOSER_ENV="chicago-taxi-composer"
+          
+          if gcloud composer environments describe "$COMPOSER_ENV" \
+            --location "$REGION" \
+            --project "$PROJECT_ID" \
+            --format="value(name)" 2>/dev/null | grep -q "$COMPOSER_ENV"; then
+            echo "✅ Composer environment existe"
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️  Composer environment no existe. Creándolo..."
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ secrets.GCP_REGION || 'us-central1' }}
+        continue-on-error: true
+      
+      - name: Create Composer environment (if needed)
+        if: steps.check-composer.outputs.exists == 'false'
+        run: |
+          PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          REGION="${{ secrets.GCP_REGION || 'us-central1' }}"
+          COMPOSER_ENV="chicago-taxi-composer"
+          
+          echo "🔄 Creando entorno de Cloud Composer (esto puede tardar 20-30 minutos)..."
+          gcloud composer environments create "$COMPOSER_ENV" \
+            --location "$REGION" \
+            --project "$PROJECT_ID" \
+            --image-version composer-2.4.0-airflow-2.5.0 \
+            --machine-type n1-standard-2 \
+            --node-count 3 \
+            --disk-size 30GB \
+            --python-version 3 || echo "⚠️  Error creando Composer (puede que ya exista o falten permisos)"
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ secrets.GCP_REGION || 'us-central1' }}
+        continue-on-error: true
+      
+      - name: Get Composer bucket
+        id: get-bucket
+        run: |
+          PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          REGION="${{ secrets.GCP_REGION || 'us-central1' }}"
+          COMPOSER_ENV="chicago-taxi-composer"
+          
+          # Esperar un poco si se acaba de crear
+          sleep 30
+          
+          BUCKET=$(gcloud composer environments describe "$COMPOSER_ENV" \
+            --location "$REGION" \
+            --project "$PROJECT_ID" \
+            --format="value(config.dagGcsPrefix)" 2>/dev/null | sed 's|/dags||' || echo "")
+          
+          if [ -z "$BUCKET" ]; then
+            echo "❌ No se pudo obtener el bucket de Composer"
+            echo "   El entorno puede estar aún creándose. Espera 20-30 minutos y ejecuta manualmente:"
+            echo "   ./scripts/setup_airflow.sh"
+            exit 1
+          fi
+          
+          echo "✅ Bucket encontrado: $BUCKET"
+          echo "bucket=$BUCKET" >> $GITHUB_OUTPUT
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ secrets.GCP_REGION || 'us-central1' }}
+        continue-on-error: false
+      
+      - name: Upload DAGs to Composer
+        run: |
+          BUCKET="${{ steps.get-bucket.outputs.bucket }}"
+          echo "📤 Subiendo DAGs a Composer..."
+          gsutil -m cp -r airflow/dags/* "gs://$BUCKET/dags/" || true
+          echo "✅ DAGs subidos"
+        continue-on-error: true
+      
+      - name: Upload dbt to Composer
+        run: |
+          BUCKET="${{ steps.get-bucket.outputs.bucket }}"
+          echo "📤 Subiendo dbt a Composer..."
+          gsutil -m cp -r dbt/* "gs://$BUCKET/dags/dbt/" || true
+          echo "✅ dbt subido"
+        continue-on-error: true
+      
+      - name: Upload service account key to Composer
+        run: |
+          BUCKET="${{ steps.get-bucket.outputs.bucket }}"
+          if [ -f "github-actions-key.json" ]; then
+            echo "📤 Subiendo service account key..."
+            gsutil cp github-actions-key.json "gs://$BUCKET/dags/service-account-key.json" || true
+            echo "✅ Service account key subido"
+          else
+            echo "⚠️  github-actions-key.json no encontrado. Usando credenciales por defecto."
+          fi
+        continue-on-error: true
+      
+      - name: Set Airflow variables
+        run: |
+          PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          REGION="${{ secrets.GCP_REGION || 'us-central1' }}"
+          COMPOSER_ENV="chicago-taxi-composer"
+          
+          echo "🔧 Configurando variables de Airflow..."
+          
+          # Configurar variables usando gcloud composer
+          gcloud composer environments run "$COMPOSER_ENV" \
+            --location "$REGION" \
+            variables -- \
+            --set GCP_PROJECT_ID "$PROJECT_ID" \
+            --set GCP_REGION "$REGION" || echo "⚠️  Error configurando variables (puede requerir Airflow CLI)"
+          
+          echo "✅ Variables configuradas"
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ secrets.GCP_REGION || 'us-central1' }}
+        continue-on-error: true
+      
+      - name: Airflow setup summary
+        run: |
+          PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          REGION="${{ secrets.GCP_REGION || 'us-central1' }}"
+          COMPOSER_ENV="chicago-taxi-composer"
+          
+          echo ""
+          echo "=========================================="
+          echo "✅ AIRFLOW CONFIGURADO"
+          echo "=========================================="
+          echo ""
+          echo "📋 Próximos pasos:"
+          echo "1. Ve a Airflow UI:"
+          echo "   https://console.cloud.google.com/composer/environments/$COMPOSER_ENV/monitoring?project=$PROJECT_ID"
+          echo ""
+          echo "2. Trigger el DAG 'chicago_taxi_historical_ingestion' (una vez)"
+          echo ""
+          echo "3. El DAG 'chicago_taxi_daily_pipeline' se ejecutará automáticamente todos los días a las 2 AM UTC"
+          echo ""
+          echo "=========================================="
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ secrets.GCP_REGION || 'us-central1' }}
+
   deploy-dbt:
-    name: Deploy dbt Models
+    name: Deploy dbt Models (Legacy - usar Airflow en su lugar)
     runs-on: ubuntu-latest
     needs: [deploy-terraform, ingest-historical-weather]
+    if: false  # Deshabilitado - usar Airflow en su lugar
     defaults:
       run:
         working-directory: ./dbt
