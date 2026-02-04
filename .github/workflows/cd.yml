@@ -862,12 +862,28 @@ jobs:
           # Normalizar el bucket: remover gs:// si está presente y luego agregarlo
           BUCKET=$(echo "$BUCKET_RAW" | sed 's|^gs://||')
           BUCKET_PATH="gs://$BUCKET"
+          
+          echo "📤 Creando service account key desde secret..."
+          # Crear el archivo desde el secret
+          echo '${{ secrets.GCP_SA_KEY }}' > github-actions-key.json
+          
           if [ -f "github-actions-key.json" ]; then
-            echo "📤 Subiendo service account key..."
-            gsutil cp github-actions-key.json "$BUCKET_PATH/data/github-actions-key.json" || true
-            echo "✅ Service account key subido"
+            echo "✅ Service account key creado"
+            echo "📤 Subiendo service account key a Composer..."
+            gsutil cp github-actions-key.json "$BUCKET_PATH/data/github-actions-key.json" || {
+              echo "⚠️  Error subiendo service account key, pero continuando..."
+              exit 0
+            }
+            echo "✅ Service account key subido a $BUCKET_PATH/data/github-actions-key.json"
+            
+            # Verificar que se subió correctamente
+            gsutil ls "$BUCKET_PATH/data/github-actions-key.json" && echo "✅ Verificado: archivo existe en GCS"
+            
+            # Limpiar archivo local (no dejar credenciales en el runner)
+            rm -f github-actions-key.json
           else
-            echo "⚠️  github-actions-key.json no encontrado. Usando credenciales por defecto."
+            echo "❌ Error: No se pudo crear github-actions-key.json"
+            exit 1
           fi
         continue-on-error: true
       
