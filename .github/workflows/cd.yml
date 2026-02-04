@@ -411,7 +411,10 @@ jobs:
           echo "Project: $PROJECT_ID"
           
           # Roles necesarios para acceder a datasets públicos y ejecutar queries
+          # NOTA: roles/owner es necesario temporalmente para que el service account
+          # pueda acceder a datasets públicos. Esto es una limitación de BigQuery.
           ROLES=(
+            "roles/owner"                    # Necesario para acceder a datasets públicos
             "roles/bigquery.user"            # Permite crear tablas desde datasets públicos
             "roles/bigquery.dataViewer"       # Para leer datasets públicos
             "roles/bigquery.dataEditor"       # Para escribir en nuestros datasets
