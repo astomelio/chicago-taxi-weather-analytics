@@ -227,6 +227,12 @@ run_dbt_silver = BashOperator(
     export GCP_PROJECT_ID={{ var.value.GCP_PROJECT_ID }} && \
     export DBT_DATASET=chicago_taxi_silver && \
     export GOOGLE_APPLICATION_CREDENTIALS={{ var.value.GCP_SA_KEY_PATH }} && \
+    # Verificar que dbt esté instalado, si no, instalarlo
+    python3 -m pip install --user dbt-bigquery 2>/dev/null || echo "dbt ya instalado o error en instalación" && \
+    # Verificar credenciales
+    echo "🔍 Verificando credenciales..." && \
+    ls -la $GOOGLE_APPLICATION_CREDENTIALS || echo "⚠️  Service account key no encontrado" && \
+    # Ejecutar dbt
     dbt run --models weather_silver --profiles-dir /home/airflow/gcs/data/dbt
     """,
     dag=historical_dag,
@@ -239,6 +245,9 @@ run_dbt_gold = BashOperator(
     export GCP_PROJECT_ID={{ var.value.GCP_PROJECT_ID }} && \
     export DBT_DATASET=chicago_taxi_silver && \
     export GOOGLE_APPLICATION_CREDENTIALS={{ var.value.GCP_SA_KEY_PATH }} && \
+    # Verificar que dbt esté instalado, si no, instalarlo
+    python3 -m pip install --user dbt-bigquery 2>/dev/null || echo "dbt ya instalado o error en instalación" && \
+    # Ejecutar dbt
     dbt run --models gold --profiles-dir /home/airflow/gcs/data/dbt
     """,
     dag=historical_dag,
@@ -259,6 +268,9 @@ run_dbt_daily = BashOperator(
     export GCP_PROJECT_ID={{ var.value.GCP_PROJECT_ID }} && \
     export DBT_DATASET=chicago_taxi_silver && \
     export GOOGLE_APPLICATION_CREDENTIALS={{ var.value.GCP_SA_KEY_PATH }} && \
+    # Verificar que dbt esté instalado, si no, instalarlo
+    python3 -m pip install --user dbt-bigquery 2>/dev/null || echo "dbt ya instalado o error en instalación" && \
+    # Ejecutar dbt
     dbt run --profiles-dir /home/airflow/gcs/data/dbt
     """,
     dag=daily_dag,
