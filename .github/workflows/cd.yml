@@ -980,12 +980,12 @@ jobs:
             > "$TEMP_DBT_DIR/profiles.yml"
           
           echo "📋 profiles.yml creado para Airflow (usa oauth/ADC para acceder a datasets públicos)"
-          echo "   Método: oauth (usa credenciales por defecto de Airflow)"
+          echo "   Método: oauth (usa Application Default Credentials de Airflow)"
           
           # Subir dbt con profiles.yml correcto
           gsutil -m cp -r "$TEMP_DBT_DIR"/* "$BUCKET_PATH/data/dbt/" || true
           rm -rf "$TEMP_DBT_DIR"
-          echo "✅ dbt subido con profiles.yml configurado para service-account"
+          echo "✅ dbt subido con profiles.yml configurado para oauth (ADC)"
         continue-on-error: true
       
       - name: Upload service account key to Composer
