@@ -401,6 +401,18 @@ jobs:
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
       
+      - name: Grant BigQuery Public Data Viewer role to GitHub Actions SA
+        run: |
+          echo "🔐 Otorgando permisos para acceder a datasets públicos..."
+          SA_EMAIL=$(echo '${{ secrets.GCP_SA_KEY }}' | jq -r '.client_email')
+          echo "Service Account: $SA_EMAIL"
+          
+          gcloud projects add-iam-policy-binding ${{ secrets.GCP_PROJECT_ID }} \
+            --member="serviceAccount:$SA_EMAIL" \
+            --role="roles/bigquery.dataViewer" \
+            --condition=None || echo "⚠️  Permiso ya existe o no se pudo otorgar"
+        continue-on-error: true
+      
       - name: Setup dbt profiles directory
         run: |
           mkdir -p ~/.dbt
