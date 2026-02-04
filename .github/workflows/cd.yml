@@ -458,13 +458,13 @@ jobs:
           echo ""
           
           # Intentar crear (puede fallar si ya existe o por permisos)
+          # NOTA: Composer 2.x no acepta --disk-size
           gcloud composer environments create "$COMPOSER_ENV" \
             --location "$REGION" \
             --project "$PROJECT_ID" \
             --image-version composer-2.4.0-airflow-2.5.0 \
             --machine-type n1-standard-2 \
             --node-count 3 \
-            --disk-size 30GB \
             --python-version 3 2>&1 || {
             EXIT_CODE=$?
             if [ $EXIT_CODE -eq 1 ]; then
