@@ -895,6 +895,7 @@ jobs:
           echo "🔧 Configurando variables de Airflow..."
           
           # Configurar variables usando gcloud composer
+          # Usar Airflow CLI dentro del entorno de Composer
           gcloud composer environments run "$COMPOSER_ENV" \
             --location "$REGION" \
             variables -- \
@@ -904,7 +905,22 @@ jobs:
             --set DBT_PROFILES_DIR "/home/airflow/gcs/data/dbt" \
             --set DBT_PROFILE "chicago_taxi_analysis" \
             --set GCP_SA_KEY_PATH "/home/airflow/gcs/data/github-actions-key.json" \
-            --set OPENWEATHER_API_KEY "${{ secrets.OPENWEATHER_API_KEY || '' }}" || echo "⚠️  Error configurando variables (puede requerir Airflow CLI)"
+            --set OPENWEATHER_API_KEY "${{ secrets.OPENWEATHER_API_KEY || '' }}" || {
+            echo "⚠️  Error configurando variables con gcloud, intentando con Airflow CLI..."
+            # Fallback: usar Airflow CLI directamente
+            gcloud composer environments run "$COMPOSER_ENV" \
+              --location "$REGION" \
+              variables -- \
+              set GCP_PROJECT_ID "$PROJECT_ID" || true
+            gcloud composer environments run "$COMPOSER_ENV" \
+              --location "$REGION" \
+              variables -- \
+              set GCP_REGION "$REGION" || true
+            gcloud composer environments run "$COMPOSER_ENV" \
+              --location "$REGION" \
+              variables -- \
+              set GCP_SA_KEY_PATH "/home/airflow/gcs/data/github-actions-key.json" || true
+          }
           
           echo "✅ Variables configuradas"
         env:

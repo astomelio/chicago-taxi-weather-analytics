@@ -155,9 +155,9 @@ run_dbt_silver = BashOperator(
     task_id='run_dbt_silver',
     bash_command="""
     cd /home/airflow/gcs/data/dbt && \
-    export GCP_PROJECT_ID={{ var.value.GCP_PROJECT_ID }} && \
+    export GCP_PROJECT_ID={{ var.value.get('GCP_PROJECT_ID', 'brave-computer-454217-q4') }} && \
     export DBT_DATASET=chicago_taxi_silver && \
-    export GOOGLE_APPLICATION_CREDENTIALS={{ var.value.GCP_SA_KEY_PATH }} && \
+    export GOOGLE_APPLICATION_CREDENTIALS={{ var.value.get('GCP_SA_KEY_PATH', '/home/airflow/gcs/data/github-actions-key.json') }} && \
     # Verificar que dbt esté instalado, si no, instalarlo
     python3 -m pip install --user dbt-bigquery 2>/dev/null || echo "dbt ya instalado o error en instalación" && \
     # Verificar credenciales
@@ -173,9 +173,9 @@ run_dbt_gold = BashOperator(
     task_id='run_dbt_gold',
     bash_command="""
     cd /home/airflow/gcs/data/dbt && \
-    export GCP_PROJECT_ID={{ var.value.GCP_PROJECT_ID }} && \
+    export GCP_PROJECT_ID={{ var.value.get('GCP_PROJECT_ID', 'brave-computer-454217-q4') }} && \
     export DBT_DATASET=chicago_taxi_silver && \
-    export GOOGLE_APPLICATION_CREDENTIALS={{ var.value.GCP_SA_KEY_PATH }} && \
+    export GOOGLE_APPLICATION_CREDENTIALS={{ var.value.get('GCP_SA_KEY_PATH', '/home/airflow/gcs/data/github-actions-key.json') }} && \
     # Verificar que dbt esté instalado, si no, instalarlo
     python3 -m pip install --user dbt-bigquery 2>/dev/null || echo "dbt ya instalado o error en instalación" && \
     # Ejecutar dbt
@@ -196,9 +196,9 @@ run_dbt_daily = BashOperator(
     task_id='run_dbt_daily',
     bash_command="""
     cd /home/airflow/gcs/data/dbt && \
-    export GCP_PROJECT_ID={{ var.value.GCP_PROJECT_ID }} && \
+    export GCP_PROJECT_ID={{ var.value.get('GCP_PROJECT_ID', 'brave-computer-454217-q4') }} && \
     export DBT_DATASET=chicago_taxi_silver && \
-    export GOOGLE_APPLICATION_CREDENTIALS={{ var.value.GCP_SA_KEY_PATH }} && \
+    export GOOGLE_APPLICATION_CREDENTIALS={{ var.value.get('GCP_SA_KEY_PATH', '/home/airflow/gcs/data/github-actions-key.json') }} && \
     # Verificar que dbt esté instalado, si no, instalarlo
     python3 -m pip install --user dbt-bigquery 2>/dev/null || echo "dbt ya instalado o error en instalación" && \
     # Ejecutar dbt
