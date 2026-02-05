@@ -85,16 +85,9 @@ Este proyecto analiza la relación entre las condiciones climáticas y la duraci
    - ✅ **TODO queda listo para usar**
 
 4. **Cargar datos históricos (una vez)**:
-   
-   **Opción A: Desde Airflow (Recomendado)**
    - Ve a Airflow UI (el link aparece en los logs de GitHub Actions)
    - Trigger el DAG `chicago_taxi_historical_ingestion`
    - Espera a que complete (puede tardar 20-30 minutos)
-   
-   **Opción B: Script directo (si tienes gcloud/bq instalado)**
-   ```bash
-   ./scripts/cargar_historicos_via_gcs.sh <PROJECT_ID> [REGION]
-   ```
    
    El pipeline diario se ejecutará automáticamente después de cargar los históricos
 
@@ -144,9 +137,10 @@ Ver [airflow/README.md](airflow/README.md) para instrucciones completas.
 - ✅ Despliega toda la infraestructura
 - ✅ Ejecuta modelos dbt
 
-### Crear Dashboard en Looker Studio
+### Dashboard en Looker Studio
 
-Sigue las instrucciones en `CREAR_DASHBOARD.md` para crear el dashboard.
+**Link del dashboard**: https://lookerstudio.google.com/s/qfSVoIMVddw  
+En este link se encuentra el dashboard del proyecto que muestra el análisis de la relación entre clima y duración de viajes.
 
 **Nota**: Una vez creado, compartir el dashboard con:
 - alejandro@astrafy.io
