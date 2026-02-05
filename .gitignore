@@ -15,12 +15,14 @@ env/
 venv/
 ENV/
 .venv
+.venv_*
 
 # dbt
 dbt_packages/
 target/
 logs/
 profiles.yml
+dbt/.user.yml
 
 # GCP
 *.json
