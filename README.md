@@ -138,13 +138,8 @@ Ver [airflow/README.md](airflow/README.md) para instrucciones completas.
 ### Dashboard en Looker Studio
 
 **Link del dashboard**: https://lookerstudio.google.com/s/qfSVoIMVddw  
-En este link se encuentra el dashboard del proyecto que muestra el análisis de la relación entre clima y duración de viajes.
+En este link se encuentra el dashboard del proyecto que muestra el análisis de la relación entre clima y duración de viajes. 
 
-**Nota**: Una vez creado, compartir el dashboard con:
-- alejandro@astrafy.io
-- felipe.bereilh@orbidi.com
-
-Y agregar el link en este README.
 
 ## Filtros de Datos
 
@@ -236,6 +231,3 @@ Al usar solo 6 meses de datos (junio-diciembre 2023), las consultas permanecen d
 - **Resultado**: ✅ Todos pasan
 - **Cobertura**: `not_null` y `unique` en claves y fechas principales
 
-## Autor
-
-Desarrollado para la prueba técnica de Data Engineer de Orbidi.
