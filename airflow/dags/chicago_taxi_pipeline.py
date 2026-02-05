@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.providers.google.cloud.operators.bigquery import BigQueryCheckOperator
 from airflow.providers.google.cloud.operators.bigquery import BigQueryInsertJobOperator
-from airflow.providers.google.cloud.operators.bigquery import BigQueryCreateExternalTableOperator
 from airflow.providers.google.cloud.transfers.bigquery_to_gcs import BigQueryToGCSOperator
 from airflow.providers.google.cloud.hooks.gcs import GCSHook
 from airflow.operators.python import PythonOperator
@@ -204,19 +203,20 @@ export_public_taxi_to_gcs = BigQueryToGCSOperator(
     dag=historical_dag,
 )
 
-create_external_table = BigQueryCreateExternalTableOperator(
+create_external_table = BigQueryInsertJobOperator(
     task_id='create_external_taxi_table',
-    table_resource={
-        "tableReference": {
-            "projectId": PROJECT_ID,
-            "datasetId": RAW_DATASET,
-            "tableId": "taxi_trips_ext",
-        },
-        "externalDataConfiguration": {
-            "sourceFormat": "PARQUET",
-            "sourceUris": [EXPORT_URI],
-            "autodetect": True,
-        },
+    configuration={
+        "query": {
+            "query": f"""
+            CREATE EXTERNAL TABLE IF NOT EXISTS `{EXTERNAL_TABLE_ID}`
+            OPTIONS (
+              format = 'PARQUET',
+              uris = ['{EXPORT_URI}'],
+              autodetect = TRUE
+            )
+            """,
+            "useLegacySql": False,
+        }
     },
     location=REGION,
     dag=historical_dag,
