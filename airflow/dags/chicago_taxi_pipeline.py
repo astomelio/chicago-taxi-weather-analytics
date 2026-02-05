@@ -92,7 +92,10 @@ def trigger_weather_function(historical=True, **context):
     import requests
     import json
     
-    function_url = f"https://{REGION}-{PROJECT_ID}.cloudfunctions.net/weather-ingestion"
+    function_url = Variable.get(
+        "WEATHER_FUNCTION_URL",
+        default_var=f"https://{REGION}-{PROJECT_ID}.cloudfunctions.net/weather-ingestion",
+    )
     
     # Obtener ID token para autenticación con Cloud Functions
     # Cloud Functions requiere un ID token, no un access token
@@ -132,6 +135,11 @@ def trigger_weather_function(historical=True, **context):
         print(f"🔄 Invocando Cloud Function: {function_url}")
         print(f"   Payload: {json.dumps(payload)}")
         response = requests.post(function_url, json=payload, headers=headers, timeout=900)
+        if response.status_code == 404:
+            print("❌ Cloud Function no encontrada (404).")
+            print(f"   URL actual: {function_url}")
+            print("   Configura la variable Airflow WEATHER_FUNCTION_URL")
+            print("   con la URL real de la función desplegada.")
         response.raise_for_status()
         print(f"✅ Cloud Function triggered successfully: {response.status_code}")
         if response.text:
