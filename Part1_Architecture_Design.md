@@ -1,677 +1,178 @@
-# Part 1: Design Challenge - Arquitectura de Solución Analítica
+# Arquitectura Analítica – Data Mesh en GCP
 
-## Resumen Ejecutivo
+1. Objetivo
 
-Solución de arquitectura de datos basada en **Data Mesh** para un cliente con múltiples fuentes de datos, diseñada para servir dashboards de BI y modelos ML, utilizando Google Cloud Platform y tecnologías open-source con enfoque en GitOps y DataOps.
-
-## Principios de Diseño
-
-- **Data Mesh**: Arquitectura descentralizada con dominios de datos autónomos
-- **GitOps/DataOps**: Automatización completa mediante CI/CD
-- **Open Source First**: Priorizar tecnologías open-source
-- **Escalabilidad**: Diseño extensible para nuevos dominios y fuentes
-- **Gobernanza Federada**: Control descentralizado con estándares centralizados
-
----
-
-## Componentes de la Arquitectura
-
-### 1. Capa de Ingesta de Datos (Data Ingestion Layer)
-
-#### 1.1 Fuentes de Datos
-
-**Bases de Datos Transaccionales:**
-- **PostgreSQL** → CDC (Change Data Capture) con Debezium
-- **MySQL** → CDC con Debezium
-- **MongoDB** → Change Streams API
+Diseñar una plataforma de datos en Google Cloud que integre múltiples fuentes, sirva analítica (BI y ML) y escale por dominios siguiendo un enfoque Data Mesh.
 
-**Aplicaciones:**
-- **SAP** → SAP Data Services / SAP BW Extractors
-- **Salesforce** → Salesforce API / MuleSoft
-- **SurveyMonkey** → REST API
-
-#### 1.2 Componentes de Ingesta
-
-**Para Batch (Datos históricos y diarios):**
-- **Airbyte** (open-source) - ETL moderno, fácil de usar
-- **Cloud Data Fusion** (Google Cloud, basado en CDAP open-source)
-- **Cloud Storage** - Almacenamiento temporal de datos extraídos
-
-**Para Streaming (Cambios en tiempo real):**
-- **Cloud Pub/Sub** - Cola de mensajes para eventos
-- **Dataflow** (Apache Beam) - Procesamiento de streams
-- **Debezium** (open-source) - Change Data Capture (CDC) para bases de datos
-  - **¿Qué es Debezium?** Es una herramienta que detecta cambios en bases de datos (INSERT, UPDATE, DELETE) y los convierte en eventos de streaming. Útil para mantener datos sincronizados en tiempo real.
-  - **Alternativa más simple:** Usar Airbyte también para streaming o hacer extracciones incrementales diarias
-
-**Para APIs REST:**
-- **Cloud Functions** - Funciones serverless para llamar APIs
-- **Cloud Scheduler** - Programar llamadas periódicas
-
-**Flujo:**
-```
-Fuentes → [CDC/API/Extractors] → Pub/Sub/Storage → Data Lake
-```
-
-**Nota:** Para el diseño del desafío, puedes simplificar usando principalmente **Airbyte** para todo tipo de ingesta (batch y streaming), que es más fácil de entender y mantener.
-
----
-
-### 2. Data Lake (Bronze Layer)
-
-**Componente:** Google Cloud Storage (GCS)
-
-**Estructura:**
-```
-gs://data-lake/
-├── bronze/
-│   ├── customers/
-│   │   ├── postgresql/
-│   │   ├── salesforce/
-│   │   └── sap/
-│   ├── products/
-│   │   ├── mysql/
-│   │   └── sap/
-│   └── maisons/
-│       ├── mongodb/
-│       └── surveymonkey/
-└── raw/
-    └── [formato original: JSON, CSV, Parquet]
-```
+2. Principios
 
-**Características:**
-- Formato: Parquet (optimizado)
-- Particionamiento: Por dominio y fecha
-- Retención: Configurable por dominio
-- Versionado: Git-like con DVC (Data Version Control)
+Arquitectura Data Mesh con dominios autónomos.
 
----
+Servicios cloud-native sobre GCP.
 
-### 3. Data Warehouse (Silver/Gold Layers)
+Uso de tecnologías open-source.
 
-**Componente:** BigQuery
+Automatización con CI/CD.
 
-**Estructura por Dominio (Data Mesh):**
+Gobernanza federada.
 
-```
-Proyecto GCP: analytics-platform
-├── customers_domain/
-│   ├── silver/          # Datos limpios y validados
-│   └── gold/            # Datos agregados y listos para consumo
-├── products_domain/
-│   ├── silver/
-│   └── gold/
-├── maisons_domain/
-│   ├── silver/
-│   └── gold/
-└── shared/              # Datos compartidos entre dominios
-    └── gold/
-```
+3. Arquitectura General
 
-**Características:**
-- Cada dominio es autónomo (equipo de datos responsable)
-- Datos compartidos en `shared/` para joins cross-domain
-- Particionamiento y clustering por fecha/ID
-- Column-level security por dominio
+Flujo principal:
 
----
+Fuentes → Ingesta → Data Lake → Data Warehouse → BI / ML
 
-### 4. Capa de Transformación (Transformation Layer)
 
-#### 4.1 dbt (Data Build Tool) - Open Source
+Implementación:
 
-**Uso:** Transformaciones SQL en BigQuery
+Postgres / MySQL / MongoDB / SAP / APIs
+            ↓
+Airflow + Debezium + APIs
+            ↓
+Cloud Storage (Bronze)
+            ↓
+BigQuery (Silver / Gold)
+            ↓
+Looker / Vertex AI
 
-**Estructura:**
-```
-dbt/
-├── models/
-│   ├── customers_domain/
-│   │   ├── silver/
-│   │   └── gold/
-│   ├── products_domain/
-│   │   ├── silver/
-│   │   └── gold/
-│   └── maisons_domain/
-│       ├── silver/
-│       └── gold/
-├── macros/
-├── tests/
-└── dbt_project.yml
-```
+4. Ingesta
 
-**Ejecución:**
-- Cloud Composer (Airflow) orquesta ejecuciones
-- CI/CD con GitHub Actions valida y ejecuta
-- Tests automatizados en cada PR
+Herramientas:
 
-#### 4.2 Apache Spark (Open Source)
+Airflow como orquestador general.
 
-**Uso:** Transformaciones complejas, procesamiento de datos no estructurados
+Debezium para CDC desde bases de datos transaccionales.
 
-**Componente:** Dataproc (managed Spark)
+Pub/Sub como bus de eventos.
 
-**Casos de uso:**
-- Procesamiento de logs
-- Transformaciones complejas de MongoDB
-- Feature engineering para ML
+Cloud Functions para consumo de APIs REST.
 
----
+Resultado:
+Todos los datos aterrizan en Cloud Storage en formato crudo.
 
-### 5. Data Mesh - Dominios de Datos
+5. Data Lake (Bronze)
 
-#### 5.1 Dominio: Customers
+Tecnología: Google Cloud Storage.
 
-**Responsable:** Equipo de Customer Analytics
+Rol: capa de persistencia inicial de todos los datos.
 
-**Fuentes:**
-- PostgreSQL (CRM interno)
-- Salesforce (CRM externo)
-- SAP (sistema ERP)
+Estructura lógica:
 
-**Productos de Datos:**
-- `customers_silver`: Clientes unificados y deduplicados
-- `customers_gold`: Métricas de clientes, segmentación
-- `customer_360`: Vista 360° del cliente
+gs://data-lake/bronze/customers/
+gs://data-lake/bronze/products/
+gs://data-lake/bronze/maisons/
 
-#### 5.2 Dominio: Products
 
-**Responsable:** Equipo de Product Analytics
+Características:
 
-**Fuentes:**
-- MySQL (catálogo de productos)
-- SAP (inventario, compras)
+Datos sin transformar.
 
-**Productos de Datos:**
-- `products_silver`: Catálogo unificado
-- `products_gold`: Métricas de productos, recomendaciones base
+Particionados por fecha.
 
-#### 5.3 Dominio: Maisons
+Formatos: Parquet / JSON.
 
-**Responsable:** Equipo de Brand Analytics
+6. Data Warehouse
 
-**Fuentes:**
-- MongoDB (datos de marcas/maisons)
-- SurveyMonkey (encuestas de marca)
+Tecnología: BigQuery.
 
-**Productos de Datos:**
-- `maisons_silver`: Datos de marcas normalizados
-- `maisons_gold`: Métricas de marca, NPS
+Modelo: un dataset por dominio.
 
-#### 5.4 Extensibilidad
+customers_domain
+products_domain
+maisons_domain
+shared
 
-**Nuevos dominios:** Agregar siguiendo el mismo patrón:
-1. Crear dataset en BigQuery: `{domain}_domain`
-2. Configurar ingesta desde nuevas fuentes
-3. Crear modelos dbt en `dbt/models/{domain}_domain/`
-4. Documentar en Data Catalog
 
----
+Capas:
 
-### 6. Capa de Machine Learning
+Silver: limpieza, tipado y normalización.
 
-#### 6.1 Vertex AI (Google Cloud)
+Gold: métricas y modelos de negocio.
 
-**Componentes:**
-- **Vertex AI Workbench**: Jupyter notebooks para experimentación
-- **Vertex AI Training**: Entrenamiento de modelos
-- **Vertex AI Prediction**: Servicio de predicciones
-- **Vertex AI Feature Store**: Almacén de features
+7. Transformaciones
 
-#### 6.2 MLflow (Open Source)
+dbt para transformaciones SQL y validaciones.
 
-**Uso:** Tracking de experimentos, versionado de modelos
+Spark (Dataproc) para transformaciones complejas.
 
-**Integración:**
-- Vertex AI Workbench ejecuta MLflow
-- Modelos versionados en Artifact Registry
-- Metadata en BigQuery
+Orquestación completa con Airflow.
 
-#### 6.3 Modelos ML
+8. Data Mesh
 
-**Recomendaciones:**
-- Collaborative Filtering (customers × products)
-- Content-based (productos similares)
+Cada dominio es responsable de su ciclo completo de datos:
 
-**Predicciones:**
-- Churn prediction (customers)
-- Demand forecasting (products)
-- Brand sentiment (maisons)
+Dominio	Producto
+Customers	customer_360
+Products	product_metrics
+Maisons	brand_nps
 
-**Pipeline:**
-```
-Features (Feature Store) → Training (Vertex AI) → Model Registry → Serving (Vertex AI Endpoints)
-```
+Los datos comunes se publican en el dataset shared.
 
----
+9. BI
 
-### 7. Capa de Visualización y BI
+Herramientas:
 
-#### 7.1 Looker Studio (Google)
+Looker Studio / Looker.
 
-**Uso:** Dashboards para departamentos
+Alternativa open-source: Lightdash.
 
-**Estructura:**
-- Dashboard por dominio (Customers, Products, Maisons)
-- Dashboard ejecutivo (cross-domain)
-- Dashboards operacionales (tiempo real)
+Dashboards por dominio y dashboards ejecutivos cross-domain.
 
-#### 7.2 Looker (Opcional - Open Source: Lightdash)
+10. Machine Learning
 
-**Uso:** BI self-service para analistas
+Stack:
 
-**Características:**
-- Modelos de datos desde dbt
-- Exploración ad-hoc
-- Embedded analytics
+Vertex AI.
 
-#### 7.3 Dataplex (Google Cloud)
+MLflow.
 
-**Uso:** Data Catalog y descubrimiento de datos
+Feature Store sobre BigQuery.
 
----
+Pipeline:
 
-### 8. Gobernanza Federada
+BigQuery → Feature Store → Vertex AI → Predicciones → BigQuery
 
-#### 8.1 Data Catalog (Dataplex)
+11. Gobernanza
 
-**Funcionalidades:**
-- Catálogo de datos por dominio
-- Lineage (rastreo de origen)
-- Metadata management
-- Búsqueda de datos
+Dataplex para catálogo y lineage.
 
-#### 8.2 Access Control
+IAM por dominio.
 
-**BigQuery Column-Level Security:**
-- Políticas por dominio
-- Roles: `data_analyst_{domain}`, `data_engineer_{domain}`, `data_scientist_{domain}`
+Column-level security en BigQuery.
 
-**IAM Roles:**
-```
-roles/
-├── customers_domain.admin
-├── customers_domain.viewer
-├── products_domain.admin
-└── maisons_domain.admin
-```
+Auditoría con Cloud Logging.
 
-#### 8.3 Data Observability
+12. GitOps / DataOps
 
-**Componentes:**
-- **Monte Carlo Data** (open-source: Great Expectations)
-- **dbt tests**: Validaciones en cada transformación
-- **Cloud Monitoring**: Alertas de calidad de datos
-- **Cloud Logging**: Auditoría de acceso
+Repositorios:
 
-**Métricas monitoreadas:**
-- Freshness (actualización de datos)
-- Volume (volumen esperado)
-- Schema changes
-- Data quality (nulls, duplicados, outliers)
+data-infra      (Terraform)
+data-pipelines  (dbt + Airflow)
+ml-models       (ML)
 
----
 
-### 9. GitOps y DataOps
+Pipeline estándar:
 
-#### 9.1 Repositorios Git
+PR → Tests → Review → Deploy
 
-**Estructura:**
-```
-repos/
-├── data-platform-infra/     # Terraform (infraestructura)
-├── data-pipelines/          # Airflow DAGs, dbt
-├── ml-models/              # Código de ML, MLflow
-└── data-catalog/           # Metadata, documentación
-```
+13. Diagrama (referencia)
 
-#### 9.2 CI/CD Pipelines (GitHub Actions)
+Capas representadas en el esquema:
 
-**Pipeline de Infraestructura:**
-```
-PR → Terraform Plan → Review → Merge → Terraform Apply
-```
+Fuentes
 
-**Pipeline de Datos:**
-```
-PR → dbt compile → dbt test → Review → Merge → dbt run (staging) → dbt run (prod)
-```
+Ingesta: Airflow, Debezium, Pub/Sub, APIs
 
-**Pipeline de ML:**
-```
-PR → Unit tests → Review → Merge → Train model → Validate → Deploy
-```
+Data Lake: Cloud Storage (Bronze)
 
-#### 9.3 Airflow (Cloud Composer)
+Data Warehouse: BigQuery (Customers / Products / Maisons)
 
-**Orquestación:**
-- Ingesta diaria/incremental
-- Transformaciones dbt
-- Entrenamiento de modelos ML
-- Monitoreo y alertas
+Transformación: dbt / Spark
 
-**DAGs por dominio:**
-```
-airflow/dags/
-├── customers/
-│   ├── ingest_customers_dag.py
-│   └── transform_customers_dag.py
-├── products/
-│   └── ...
-└── maisons/
-    └── ...
-```
+Consumo: Looker / Vertex AI
 
----
+Laterales:
 
-## Flujo de Datos Completo
+GitHub + CI/CD
 
-### Flujo Batch (Diario)
-
-```
-1. Fuentes → [CDC/Extractors] → Cloud Storage (Bronze)
-2. Cloud Storage → BigQuery (Silver) [via Airflow]
-3. BigQuery Silver → dbt Transform → BigQuery Gold
-4. BigQuery Gold → Looker Studio / Looker
-5. BigQuery Gold → Feature Store → ML Models
-```
-
-### Flujo Streaming (Tiempo Real)
-
-```
-1. Fuentes → Debezium CDC → Pub/Sub
-2. Pub/Sub → Dataflow (Apache Beam) → BigQuery
-3. BigQuery → Looker Studio (real-time dashboards)
-```
-
-### Flujo ML
-
-```
-1. Feature Store → Vertex AI Training
-2. Model Training → MLflow Tracking
-3. Model Validation → Artifact Registry
-4. Model Deployment → Vertex AI Endpoints
-5. Predictions → BigQuery / API
-```
-
----
-
-## Tecnologías Open-Source Utilizadas
-
-| Componente | Tecnología Open-Source |
-|------------|------------------------|
-| Ingesta | Airbyte, Debezium |
-| Transformación | dbt, Apache Spark |
-| Orquestación | Apache Airflow |
-| ML | MLflow, scikit-learn, TensorFlow |
-| Versionado de Datos | DVC (Data Version Control) |
-| Observabilidad | Great Expectations |
-| BI | Lightdash (alternativa a Looker) |
-
----
-
-## Seguridad y Compliance
-
-- **Encriptación:** En tránsito (TLS) y en reposo (AES-256)
-- **VPC:** Red privada para recursos sensibles
-- **Private IP:** BigQuery, Dataproc sin IPs públicas
-- **Auditoría:** Cloud Audit Logs para todos los accesos
-- **PII:** Dataplex Data Lineage para rastreo de datos sensibles
-- **Retención:** Políticas de lifecycle en Cloud Storage
-
----
-
-## Escalabilidad y Extensibilidad
-
-### Agregar Nuevo Dominio
-
-1. **Infraestructura:**
-   ```terraform
-   # Crear dataset BigQuery
-   resource "google_bigquery_dataset" "new_domain" {
-     dataset_id = "new_domain_domain"
-   }
-   ```
-
-2. **Ingesta:**
-   - Configurar fuente en Airbyte/Data Fusion
-   - Crear DAG en Airflow
-
-3. **Transformación:**
-   - Crear `dbt/models/new_domain_domain/`
-   - Configurar tests
-
-4. **Documentación:**
-   - Agregar a Data Catalog
-   - Documentar en README del dominio
-
-### Agregar Nueva Fuente
-
-1. Configurar conector en Airbyte/Data Fusion
-2. Mapear a dominio existente o crear nuevo
-3. Actualizar lineage en Data Catalog
-
----
-
-## Costos y Optimización
-
-- **BigQuery:** Particionamiento y clustering para reducir costos
-- **Cloud Storage:** Lifecycle policies (mover a Nearline/Coldline)
-- **Dataproc:** Auto-scaling, preemptible VMs
-- **Vertex AI:** Usar preemptible para entrenamiento
-- **Reservations:** Para workloads predecibles
-
----
-
-## Monitoreo y Alertas
-
-- **Cloud Monitoring:** Métricas de pipelines, calidad de datos
-- **Cloud Logging:** Logs centralizados
-- **Alertas:**
-  - Pipeline failures
-  - Data quality issues
-  - Model drift (ML)
-  - Cost overruns
-
----
-
-## Diagrama de Arquitectura - Componentes Clave
-
-### Vista de Alto Nivel
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    FUENTES DE DATOS                          │
-│  PostgreSQL  MySQL  MongoDB  SAP  Salesforce  SurveyMonkey  │
-└──────────────────────┬───────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│              CAPA DE INGESTA (Data Ingestion)                │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐                  │
-│  │ Debezium │  │ Airbyte  │  │  APIs    │                  │
-│  │  (CDC)   │  │ (Batch)  │  │  REST    │                  │
-│  └──────────┘  └──────────┘  └──────────┘                  │
-└──────────────────────┬───────────────────────────────────────┘
-                       │
-        ┌──────────────┴──────────────┐
-        │                             │
-        ▼                             ▼
-┌──────────────┐            ┌──────────────────┐
-│ Cloud Storage│            │   Cloud Pub/Sub  │
-│   (Bronze)   │            │    (Streaming)  │
-└──────┬───────┘            └────────┬─────────┘
-       │                              │
-       └──────────────┬───────────────┘
-                      │
-                      ▼
-┌─────────────────────────────────────────────────────────────┐
-│              DATA WAREHOUSE (BigQuery)                       │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│  │  Customers   │  │   Products   │  │   Maisons     │     │
-│  │   Domain    │  │    Domain    │  │    Domain    │     │
-│  │ Silver/Gold │  │ Silver/Gold  │  │ Silver/Gold  │     │
-│  └──────────────┘  └──────────────┘  └──────────────┘     │
-│                                                             │
-│  ┌─────────────────────────────────────────────────────┐  │
-│  │              Shared (Cross-Domain)                   │  │
-│  └─────────────────────────────────────────────────────┘  │
-└──────────────────────┬───────────────────────────────────────┘
-                       │
-        ┌──────────────┴──────────────┐
-        │                             │
-        ▼                             ▼
-┌──────────────┐            ┌──────────────────┐
-│   dbt        │            │  Apache Spark     │
-│ (SQL Transf) │            │  (Complex Transf) │
-└──────┬───────┘            └────────┬─────────┘
-       │                              │
-       └──────────────┬───────────────┘
-                      │
-        ┌─────────────┴─────────────┐
-        │                           │
-        ▼                           ▼
-┌──────────────┐          ┌──────────────────┐
-│   BI Layer   │          │   ML Layer       │
-│ Looker Studio│          │  Vertex AI       │
-│   Looker     │          │  MLflow           │
-└──────────────┘          └──────────────────┘
-```
-
-### Vista de Data Mesh
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    DATA MESH ARCHITECTURE                    │
-│                                                              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│  │   Customers  │  │   Products   │  │   Maisons    │     │
-│  │    Domain    │  │    Domain    │  │    Domain    │     │
-│  │              │  │              │  │              │     │
-│  │  ┌────────┐  │  │  ┌────────┐  │  │  ┌────────┐  │     │
-│  │  │ Ingest │  │  │  │ Ingest │  │  │  │ Ingest │  │     │
-│  │  └───┬────┘  │  │  └───┬────┘  │  │  └───┬────┘  │     │
-│  │      │       │  │      │       │  │      │       │     │
-│  │  ┌───▼────┐  │  │  ┌───▼────┐  │  │  ┌───▼────┐  │     │
-│  │  │Silver  │  │  │  │Silver  │  │  │  │Silver  │  │     │
-│  │  └───┬────┘  │  │  └───┬────┘  │  │  └───┬────┘  │     │
-│  │      │       │  │      │       │  │      │       │     │
-│  │  ┌───▼────┐  │  │  ┌───▼────┐  │  │  ┌───▼────┐  │     │
-│  │  │  Gold  │  │  │  │  Gold  │  │  │  │  Gold  │  │     │
-│  │  └────────┘  │  │  └────────┘  │  │  └────────┘  │     │
-│  │              │  │              │  │              │     │
-│  │  Team:       │  │  Team:       │  │  Team:       │     │
-│  │  Customer    │  │  Product     │  │  Brand       │     │
-│  │  Analytics   │  │  Analytics   │  │  Analytics   │     │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘     │
-│         │                 │                 │              │
-│         └─────────────────┴─────────────────┘              │
-│                            │                               │
-│                   ┌────────▼────────┐                      │
-│                   │   Shared Data   │                      │
-│                   │  (Cross-Domain) │                      │
-│                   └─────────────────┘                      │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Vista de GitOps/DataOps
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    GITOPS PIPELINE                           │
-│                                                              │
-│  ┌──────────┐    ┌──────────┐    ┌──────────┐               │
-│  │   Git    │───▶│   CI/CD  │───▶│  Deploy  │               │
-│  │ (GitHub) │    │(GitHub   │    │(Terraform│               │
-│  │          │    │ Actions) │    │ Airflow) │               │
-│  └──────────┘    └──────────┘    └──────────┘               │
-│                                                              │
-│  Repos:                                                      │
-│  • data-platform-infra (Terraform)                          │
-│  • data-pipelines (dbt, Airflow)                             │
-│  • ml-models (ML code)                                       │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Checklist para Draw.io
-
-### Elementos a Incluir:
-
-1. **Fuentes de Datos:**
-   - PostgreSQL, MySQL, MongoDB (iconos de BD)
-   - SAP, Salesforce, SurveyMonkey (iconos de apps)
-
-2. **Capa de Ingesta:**
-   - Debezium (CDC)
-   - Airbyte (batch)
-   - Cloud Functions (APIs)
-   - Pub/Sub (streaming)
-
-3. **Storage:**
-   - Cloud Storage (Bronze/Data Lake)
-   - BigQuery (Silver/Gold por dominio)
-
-4. **Transformación:**
-   - dbt
-   - Apache Spark (Dataproc)
-
-5. **Orquestación:**
-   - Cloud Composer (Airflow)
-
-6. **ML:**
-   - Vertex AI
-   - MLflow
-   - Feature Store
-
-7. **BI:**
-   - Looker Studio
-   - Looker
-
-8. **Gobernanza:**
-   - Dataplex (Data Catalog)
-   - IAM/Column Security
-
-9. **GitOps:**
-   - GitHub
-   - GitHub Actions
-   - Terraform
-
-10. **Monitoreo:**
-    - Cloud Monitoring
-    - Cloud Logging
-
-### Colores Sugeridos:
-
-- **Fuentes:** Azul claro
-- **Ingesta:** Naranja
-- **Storage:** Verde
-- **Transformación:** Amarillo
-- **ML:** Morado
-- **BI:** Rojo
-- **Gobernanza:** Gris
-- **GitOps:** Negro
-
-### Flujos (Flechas):
-
-- **Batch:** Flechas sólidas negras
-- **Streaming:** Flechas punteadas azules
-- **ML Pipeline:** Flechas moradas
-- **Metadata/Lineage:** Flechas grises finas
-
----
-
-## Notas Finales
-
-Este diseño cumple con todos los requisitos del desafío:
-- ✅ Google Cloud Platform
-- ✅ Tecnologías open-source
-- ✅ GitOps y DataOps
-- ✅ Data Mesh paradigm
-- ✅ Dominios: customers, products, maisons (extensible)
-- ✅ Gobernanza federada (acceso, observabilidad, catálogo)
-- ✅ BI dashboards
-- ✅ ML models
-
-El diseño es **extensible** y **escalable**, permitiendo agregar nuevos dominios y fuentes de datos siguiendo el mismo patrón.
+Dataplex + IAM
