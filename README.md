@@ -231,6 +231,30 @@ Este proyecto corresponde al **Part 2: Coding Challenge** del desafío técnico 
 - **Requisitos**: Terraform, dbt, automatización, BigQuery, Looker Studio
 - **Estado**: ✅ Implementado y funcionando
 
+#### Tablas y resultados (resumen)
+
+**Tablas principales**
+- **Raw**:
+  - `chicago_taxi_raw.taxi_trips_raw_table` (taxis 2023-06 a 2023-12)
+  - `chicago_taxi_raw.weather_data` (NOAA 2023-06 a 2023-12)
+- **Silver**:
+  - `chicago_taxi_silver.taxi_trips_silver`
+  - `chicago_taxi_silver.weather_silver`
+- **Gold**:
+  - `chicago_taxi_gold.daily_summary`
+  - `chicago_taxi_gold.taxi_weather_analysis`
+
+**Conteos (aprox.)**
+- `taxi_trips_silver`: **3,808,846**
+- `weather_silver`: **214**
+- `daily_summary`: **214**
+- `taxi_weather_analysis`: **5,136**
+
+**dbt tests**
+- **Total**: 7 tests
+- **Resultado**: ✅ Todos pasan
+- **Cobertura**: `not_null` y `unique` en claves y fechas principales
+
 ## Autor
 
 Desarrollado como parte del desafío técnico de Data Engineer de Orbidi.
