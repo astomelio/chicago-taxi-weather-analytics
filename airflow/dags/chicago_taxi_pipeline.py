@@ -200,7 +200,8 @@ export_public_taxi_to_gcs = BigQueryToGCSOperator(
     destination_cloud_storage_uris=[EXPORT_URI],
     export_format='PARQUET',
     compression='GZIP',
-    location=REGION,
+    project_id=PROJECT_ID,
+    location="US",
     gcp_conn_id='google_cloud_default',
     dag=historical_dag,
 )
