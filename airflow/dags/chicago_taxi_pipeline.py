@@ -214,8 +214,7 @@ create_external_table = BigQueryInsertJobOperator(
             CREATE EXTERNAL TABLE IF NOT EXISTS `{EXTERNAL_TABLE_ID}`
             OPTIONS (
               format = 'PARQUET',
-              uris = ['{EXPORT_URI}'],
-              autodetect = TRUE
+              uris = ['{EXPORT_URI}']
             )
             """,
             "useLegacySql": False,
