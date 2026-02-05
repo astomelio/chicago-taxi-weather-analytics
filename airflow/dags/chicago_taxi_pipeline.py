@@ -173,11 +173,13 @@ def taxi_data_missing(**context) -> bool:
 def ensure_export_bucket(**context):
     """Crea el bucket de export si no existe."""
     hook = GCSHook()
-    if hook.exists(EXPORT_BUCKET):
+    try:
+        hook.get_bucket(EXPORT_BUCKET)
         print(f"✅ Bucket ya existe: gs://{EXPORT_BUCKET}")
         return
-    print(f"🪣 Creando bucket: gs://{EXPORT_BUCKET}")
-    hook.create_bucket(EXPORT_BUCKET, location=REGION)
+    except Exception:
+        print(f"🪣 Creando bucket: gs://{EXPORT_BUCKET}")
+        hook.create_bucket(EXPORT_BUCKET, location=REGION)
 
 
 check_taxi_data = ShortCircuitOperator(
