@@ -5,7 +5,12 @@ Orquesta la ingesta de datos, transformaciones dbt y actualizaciones diarias.
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.providers.google.cloud.operators.bigquery import BigQueryCheckOperator
+from airflow.providers.google.cloud.operators.bigquery import BigQueryInsertJobOperator
+from airflow.providers.google.cloud.operators.bigquery import BigQueryCreateExternalTableOperator
+from airflow.providers.google.cloud.transfers.bigquery_to_gcs import BigQueryToGCSOperator
+from airflow.providers.google.cloud.hooks.gcs import GCSHook
 from airflow.operators.python import PythonOperator
+from airflow.operators.python import ShortCircuitOperator
 from airflow.operators.bash import BashOperator
 from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
 import os
@@ -14,11 +19,11 @@ import os
 from airflow.models import Variable
 
 try:
-    PROJECT_ID = Variable.get('GCP_PROJECT_ID', default_var='brave-computer-454217-q4')
+    PROJECT_ID = Variable.get('GCP_PROJECT_ID', default_var='chicago-taxi-48702')
     REGION = Variable.get('GCP_REGION', default_var='us-central1')
 except:
     # Fallback si las variables no están disponibles
-    PROJECT_ID = os.environ.get('GCP_PROJECT_ID', 'brave-computer-454217-q4')
+    PROJECT_ID = os.environ.get('GCP_PROJECT_ID', 'chicago-taxi-48702')
     REGION = os.environ.get('GCP_REGION', 'us-central1')
 RAW_DATASET = 'chicago_taxi_raw'
 SILVER_DATASET = 'chicago_taxi_silver'
@@ -142,317 +147,159 @@ def trigger_weather_function(historical=True, **context):
         print(f"❌ Error inesperado: {e}")
         raise
 
-# Activar acceso al dataset público (ejecuta query simple para activar)
-def activate_public_dataset_access(**context):
-    """
-    Activa el acceso al dataset público ejecutando una query simple.
-    BigQuery requiere que se ejecute una query contra un dataset público
-    para activar el acceso para el proyecto.
-    """
-    from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
-    from google.cloud import bigquery
-    
-    # DIAGNÓSTICO: Verificar identidad REAL
-    import google.auth
-    import json
-    import os
-    
-    print(f"🔍 DIAGNÓSTICO COMPLETO DE IDENTIDAD:")
-    print(f"   GOOGLE_APPLICATION_CREDENTIALS: {os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', 'NO CONFIGURADO')}")
-    
-    try:
-        credentials, project = google.auth.default()
-        print(f"   Tipo de credenciales: {type(credentials).__name__}")
-        print(f"   Proyecto: {project}")
-        
-        # Intentar obtener el email del service account de diferentes formas
-        identity = None
-        if hasattr(credentials, 'service_account_email'):
-            identity = credentials.service_account_email
-        elif hasattr(credentials, 'client_email'):
-            identity = credentials.client_email
-        elif hasattr(credentials, '_service_account_email'):
-            identity = credentials._service_account_email
-        elif hasattr(credentials, 'signer') and hasattr(credentials.signer, 'service_account_email'):
-            identity = credentials.signer.service_account_email
-        
-        if identity:
-            print(f"   ✅ Service Account Email: {identity}")
-        else:
-            print(f"   ⚠️  No se pudo obtener email del service account")
-            print(f"   Credenciales: {str(credentials)[:200]}")
-            
-            # Intentar obtener desde el objeto completo
-            try:
-                creds_dict = credentials.__dict__
-                for key, value in creds_dict.items():
-                    if 'email' in key.lower() or 'client_email' in key.lower():
-                        print(f"   Posible email en {key}: {value}")
-            except:
-                pass
-    except Exception as e:
-        print(f"   ❌ Error obteniendo identidad: {e}")
-        import traceback
-        print(f"   Traceback: {traceback.format_exc()}")
-    
+EXPORT_BUCKET = f"{PROJECT_ID}-taxi-export"
+EXPORT_URI = f"gs://{EXPORT_BUCKET}/taxi_trips_*.parquet"
+RAW_TABLE_ID = f"{PROJECT_ID}.{RAW_DATASET}.taxi_trips_raw_table"
+EXTERNAL_TABLE_ID = f"{PROJECT_ID}.{RAW_DATASET}.taxi_trips_ext"
+
+
+def taxi_data_missing(**context) -> bool:
+    """Evita re-procesar si la tabla ya tiene datos."""
     hook = BigQueryHook(project_id=PROJECT_ID, location=REGION)
-    client = hook.get_client()
-    
-    # Verificar identidad del cliente BigQuery
-    print(f"")
-    print(f"🔍 DIAGNÓSTICO CLIENTE BIGQUERY:")
+    query = f"SELECT COUNT(*) as cnt FROM `{RAW_TABLE_ID}`"
     try:
-        bq_creds = client._credentials
-        print(f"   Tipo: {type(bq_creds).__name__}")
-        
-        bq_identity = None
-        if hasattr(bq_creds, 'service_account_email'):
-            bq_identity = bq_creds.service_account_email
-        elif hasattr(bq_creds, 'client_email'):
-            bq_identity = bq_creds.client_email
-        elif hasattr(bq_creds, '_service_account_email'):
-            bq_identity = bq_creds._service_account_email
-        
-        if bq_identity:
-            print(f"   ✅ Service Account Email: {bq_identity}")
-        else:
-            print(f"   ⚠️  No se pudo obtener email del service account del cliente")
-            try:
-                creds_dict = bq_creds.__dict__
-                for key, value in creds_dict.items():
-                    if 'email' in key.lower() or 'client_email' in key.lower():
-                        print(f"   Posible email en {key}: {value}")
-            except:
-                pass
-    except Exception as e:
-        print(f"   ❌ Error verificando credenciales del cliente: {e}")
-    
-    print(f"")
-    
-    # Query muy simple solo para activar el acceso
-    activation_query = """
-    SELECT COUNT(*) as test
-    FROM `bigquery-public-data.chicago_taxi_trips.taxi_trips`
-    WHERE DATE(trip_start_timestamp) >= '2023-06-01'
-      AND DATE(trip_start_timestamp) <= '2023-12-31'
-    LIMIT 1
-    """
-    
-    try:
-        print(f"🔓 Activando acceso al dataset público de BigQuery...")
-        print(f"   Esto es necesario para que el service account pueda acceder")
-        job_config = bigquery.QueryJobConfig(use_legacy_sql=False)
-        query_job = client.query(activation_query, job_config=job_config, location=REGION)
-        result = query_job.result()
-        row = next(result)
-        print(f"✅ Acceso al dataset público activado. Resultado: {row.test}")
+        result = hook.get_first(query, project_id=PROJECT_ID, location=REGION)
+        row_count = result[0] if result else 0
+        if row_count > 0:
+            print(f"✅ taxi_trips_raw_table ya tiene {row_count:,} registros. Saltando carga.")
+            return False
+        print("⚠️  Tabla existe pero está vacía. Procediendo con la carga.")
         return True
     except Exception as e:
-        error_msg = str(e)
-        if "Access Denied" in error_msg or "permission" in error_msg.lower() or "403" in error_msg:
-            print(f"⚠️  No se pudo activar el acceso automáticamente: {error_msg}")
-            print(f"   El service account de Composer necesita que un usuario ejecute")
-            print(f"   una query contra el dataset público primero para activar el acceso.")
-            print(f"   Esto ya debería estar hecho si ejecutaste la query desde BigQuery Console.")
-            print(f"   Continuando de todas formas...")
-            # No hacer raise - continuar y ver si funciona
-            return False
-        else:
-            print(f"⚠️  Error inesperado activando acceso: {e}")
-            # No hacer raise - continuar
-            return False
+        print(f"⚠️  No se pudo verificar la tabla: {e}")
+        print("   Asumiendo que no hay datos. Procediendo con la carga.")
+        return True
 
-activate_access = PythonOperator(
-    task_id='activate_public_dataset_access',
-    python_callable=activate_public_dataset_access,
-    pool=None,
+
+def ensure_export_bucket(**context):
+    """Crea el bucket de export si no existe."""
+    hook = GCSHook()
+    if hook.exists(EXPORT_BUCKET):
+        print(f"✅ Bucket ya existe: gs://{EXPORT_BUCKET}")
+        return
+    print(f"🪣 Creando bucket: gs://{EXPORT_BUCKET}")
+    hook.create_bucket(EXPORT_BUCKET, location=REGION)
+
+
+check_taxi_data = ShortCircuitOperator(
+    task_id='check_taxi_data_missing',
+    python_callable=taxi_data_missing,
     dag=historical_dag,
 )
 
-# Cargar datos históricos de taxis a una tabla (no solo vista)
-def load_historical_taxi_data(**context):
-    """Carga datos históricos de taxis del dataset público a una tabla propia."""
-    from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
-    from google.cloud import bigquery
-    from google.cloud.exceptions import NotFound
-    import google.auth
-    
-    # DIAGNÓSTICO: Verificar qué identidad está usando realmente
-    try:
-        credentials, project = google.auth.default()
-        if hasattr(credentials, 'service_account_email'):
-            identity = credentials.service_account_email
-        elif hasattr(credentials, 'client_email'):
-            identity = credentials.client_email
-        else:
-            identity = str(type(credentials))
-        print(f"🔍 Identidad que está usando Airflow: {identity}")
-        print(f"   Proyecto: {project}")
-        print(f"   Tipo de credenciales: {type(credentials).__name__}")
-        
-        # Verificar si es el service account correcto
-        expected_sa = "github-actions-sa@brave-computer-454217-q4.iam.gserviceaccount.com"
-        if identity == expected_sa:
-            print(f"   ✅ Usando el service account correcto")
-        else:
-            print(f"   ⚠️  Service account diferente al esperado")
-            print(f"   Esperado: {expected_sa}")
-    except Exception as e:
-        print(f"⚠️  No se pudo determinar la identidad: {e}")
-        import traceback
-        print(f"   Traceback: {traceback.format_exc()}")
-    
-    hook = BigQueryHook(project_id=PROJECT_ID, location=REGION)
-    client = hook.get_client()
-    
-    # DIAGNÓSTICO ADICIONAL: Verificar identidad del cliente de BigQuery
-    try:
-        bq_credentials = client._credentials
-        if hasattr(bq_credentials, 'service_account_email'):
-            bq_identity = bq_credentials.service_account_email
-        elif hasattr(bq_credentials, 'client_email'):
-            bq_identity = bq_credentials.client_email
-        else:
-            bq_identity = str(type(bq_credentials))
-        print(f"🔍 Identidad del cliente BigQuery: {bq_identity}")
-    except Exception as e:
-        print(f"⚠️  No se pudo determinar identidad del cliente BigQuery: {e}")
-    
-    # Verificar si la tabla ya existe y tiene datos
-    dataset_ref = client.dataset('chicago_taxi_raw', project=PROJECT_ID)
-    table_ref = dataset_ref.table('taxi_trips_raw_table')
-    
-    try:
-        table = client.get_table(table_ref)
-        # Verificar si tiene datos
-        count_query = f"SELECT COUNT(*) as cnt FROM `{PROJECT_ID}.chicago_taxi_raw.taxi_trips_raw_table`"
-        count_job = client.query(count_query, location=REGION)
-        count_result = count_job.result()
-        row_count = next(count_result).cnt
-        
-        if row_count > 0:
-            print(f"✅ Tabla taxi_trips_raw_table ya existe con {row_count:,} registros. Saltando carga.")
-            print(f"   Los datos ya fueron cargados manualmente o en una ejecución anterior.")
-            return
-        else:
-            print(f"⚠️  Tabla existe pero está vacía.")
-            print(f"   Intentando cargar datos desde el dataset público...")
-    except NotFound:
-        print(f"📋 Tabla taxi_trips_raw_table no existe.")
-        print(f"   Intentando crear y cargar datos desde el dataset público...")
-    except Exception as e:
-        print(f"⚠️  Error verificando tabla: {e}")
-        print("   Intentando crear de todas formas...")
-    
-    # Crear tabla y cargar datos históricos
-    # Usar CREATE TABLE AS SELECT para cargar los datos
-    # NOTA: Sin CLUSTER BY para evitar problemas de sintaxis
-    load_query = f"""
-    CREATE OR REPLACE TABLE `{PROJECT_ID}.chicago_taxi_raw.taxi_trips_raw_table`
-    PARTITION BY DATE(trip_start_timestamp)
-    AS
-    SELECT 
-      unique_key,
-      taxi_id,
-      trip_start_timestamp,
-      trip_end_timestamp,
-      trip_seconds,
-      trip_miles,
-      pickup_census_tract,
-      dropoff_census_tract,
-      pickup_community_area,
-      dropoff_community_area,
-      fare,
-      tips,
-      tolls,
-      extras,
-      trip_total,
-      payment_type,
-      company,
-      pickup_latitude,
-      pickup_longitude,
-      dropoff_latitude,
-      dropoff_longitude
-    FROM `bigquery-public-data.chicago_taxi_trips.taxi_trips`
-    WHERE DATE(trip_start_timestamp) >= '2023-06-01'
-      AND DATE(trip_start_timestamp) <= '2023-12-31'
-      AND trip_start_timestamp IS NOT NULL
-      AND trip_seconds IS NOT NULL
-      AND trip_seconds > 0
-      AND trip_miles >= 0
-    """
-    
-    try:
-        print(f"🔄 Cargando datos históricos de taxis (esto puede tardar 10-20 minutos)...")
-        print(f"   Esto requiere acceso al dataset público: bigquery-public-data.chicago_taxi_trips.taxi_trips")
-        job_config = bigquery.QueryJobConfig(use_legacy_sql=False, priority='BATCH')
-        query_job = client.query(load_query, job_config=job_config, location=REGION)
-        query_job.result()  # Esperar a que termine
-        
-        # Verificar que se cargó correctamente
-        count_query = f"SELECT COUNT(*) as cnt FROM `{PROJECT_ID}.chicago_taxi_raw.taxi_trips_raw_table`"
-        count_job = client.query(count_query, location=REGION)
-        count_result = count_job.result()
-        row_count = next(count_result).cnt
-        print(f"✅ Datos históricos de taxis cargados exitosamente: {row_count:,} registros")
-        
-    except Exception as e:
-        error_msg = str(e)
-        # Verificar si es un error de permisos
-        if "Access Denied" in error_msg or "permission" in error_msg.lower() or "403" in error_msg:
-            print(f"")
-            print(f"❌ ERROR DE PERMISOS: No se puede acceder al dataset público de BigQuery")
-            print(f"")
-            print(f"═══════════════════════════════════════════════════════════════════════")
-            print(f"   SOLUCIÓN REQUERIDA (2 OPCIONES):")
-            print(f"═══════════════════════════════════════════════════════════════════════")
-            print(f"")
-            print(f"   OPCIÓN 1: Activar acceso y dejar que el DAG cargue los datos")
-            print(f"   ─────────────────────────────────────────────────────────────")
-            print(f"   1. Ve a BigQuery Console:")
-            print(f"      https://console.cloud.google.com/bigquery?project={PROJECT_ID}")
-            print(f"")
-            print(f"   2. Ejecuta esta query (con tu usuario, NO service account):")
-            print(f"      SELECT COUNT(*) as test")
-            print(f"      FROM `bigquery-public-data.chicago_taxi_trips.taxi_trips`")
-            print(f"      WHERE DATE(trip_start_timestamp) >= '2023-06-01'")
-            print(f"        AND DATE(trip_start_timestamp) <= '2023-12-31'")
-            print(f"")
-            print(f"   3. Esto activará el acceso al dataset público para todo el proyecto")
-            print(f"")
-            print(f"   4. Una vez activado, vuelve a ejecutar este DAG")
-            print(f"")
-            print(f"   OPCIÓN 2: Cargar datos manualmente (RECOMENDADO si OPCIÓN 1 no funciona)")
-            print(f"   ─────────────────────────────────────────────────────────────")
-            print(f"   1. Ve a BigQuery Console:")
-            print(f"      https://console.cloud.google.com/bigquery?project={PROJECT_ID}")
-            print(f"")
-            print(f"   2. Ejecuta los scripts SQL en este orden:")
-            print(f"      a) scripts/query_crear_tabla_vacia.sql")
-            print(f"      b) scripts/query_insert_junio.sql")
-            print(f"      c) scripts/query_insert_julio_diciembre.sql (mes por mes)")
-            print(f"")
-            print(f"   3. Verifica que la tabla tenga datos:")
-            print(f"      SELECT COUNT(*) FROM `{PROJECT_ID}.chicago_taxi_raw.taxi_trips_raw_table`")
-            print(f"      (Deberías ver ~6,931,127 registros)")
-            print(f"")
-            print(f"   4. Una vez cargados, vuelve a ejecutar este DAG")
-            print(f"      (El DAG detectará que los datos ya existen y continuará)")
-            print(f"")
-            print(f"═══════════════════════════════════════════════════════════════════════")
-            print(f"")
-            print(f"   Detalles del error: {error_msg[:200]}")
-            print(f"")
-            # Hacer raise para que el DAG falle y se notifique
-            raise Exception(f"Permisos insuficientes para acceder al dataset público. Ver instrucciones arriba.")
-        else:
-            print(f"❌ Error cargando datos históricos: {e}")
-            raise
+create_export_bucket = PythonOperator(
+    task_id='create_export_bucket',
+    python_callable=ensure_export_bucket,
+    dag=historical_dag,
+)
 
-load_historical_taxi = PythonOperator(
+export_public_taxi_to_gcs = BigQueryToGCSOperator(
+    task_id='export_public_taxi_to_gcs',
+    source_project_dataset_table='bigquery-public-data:chicago_taxi_trips.taxi_trips',
+    destination_cloud_storage_uris=[EXPORT_URI],
+    export_format='PARQUET',
+    compression='GZIP',
+    location=REGION,
+    gcp_conn_id='google_cloud_default',
+    dag=historical_dag,
+)
+
+create_external_table = BigQueryCreateExternalTableOperator(
+    task_id='create_external_taxi_table',
+    table_resource={
+        "tableReference": {
+            "projectId": PROJECT_ID,
+            "datasetId": RAW_DATASET,
+            "tableId": "taxi_trips_ext",
+        },
+        "externalDataConfiguration": {
+            "sourceFormat": "PARQUET",
+            "sourceUris": [EXPORT_URI],
+            "autodetect": True,
+        },
+    },
+    location=REGION,
+    dag=historical_dag,
+)
+
+create_raw_table = BigQueryInsertJobOperator(
+    task_id='create_raw_taxi_table',
+    configuration={
+        "query": {
+            "query": f"""
+            CREATE TABLE IF NOT EXISTS `{RAW_TABLE_ID}` (
+              unique_key STRING,
+              taxi_id STRING,
+              trip_start_timestamp TIMESTAMP,
+              trip_end_timestamp TIMESTAMP,
+              trip_seconds INT64,
+              trip_miles FLOAT64,
+              pickup_census_tract STRING,
+              dropoff_census_tract STRING,
+              pickup_community_area INT64,
+              dropoff_community_area INT64,
+              fare FLOAT64,
+              tips FLOAT64,
+              tolls FLOAT64,
+              extras FLOAT64,
+              trip_total FLOAT64,
+              payment_type STRING,
+              company STRING,
+              pickup_latitude FLOAT64,
+              pickup_longitude FLOAT64,
+              dropoff_latitude FLOAT64,
+              dropoff_longitude FLOAT64
+            )
+            PARTITION BY DATE(trip_start_timestamp)
+            """,
+            "useLegacySql": False,
+        }
+    },
+    location=REGION,
+    dag=historical_dag,
+)
+
+load_historical_taxi = BigQueryInsertJobOperator(
     task_id='load_historical_taxi_data',
-    python_callable=load_historical_taxi_data,
-    pool=None,
+    configuration={
+        "query": {
+            "query": f"""
+            INSERT INTO `{RAW_TABLE_ID}`
+            SELECT
+              unique_key,
+              taxi_id,
+              trip_start_timestamp,
+              trip_end_timestamp,
+              trip_seconds,
+              trip_miles,
+              CAST(pickup_census_tract AS STRING),
+              CAST(dropoff_census_tract AS STRING),
+              pickup_community_area,
+              dropoff_community_area,
+              fare,
+              tips,
+              tolls,
+              extras,
+              trip_total,
+              payment_type,
+              company,
+              pickup_latitude,
+              pickup_longitude,
+              dropoff_latitude,
+              dropoff_longitude
+            FROM `{EXTERNAL_TABLE_ID}`
+            WHERE DATE(trip_start_timestamp) >= '2023-06-01'
+              AND DATE(trip_start_timestamp) <= '2023-12-31'
+              AND trip_start_timestamp IS NOT NULL
+              AND trip_seconds IS NOT NULL
+              AND trip_seconds > 0
+              AND trip_miles >= 0
+            """,
+            "useLegacySql": False,
+            "priority": "BATCH",
+        }
+    },
+    location=REGION,
     dag=historical_dag,
 )
 
@@ -546,9 +393,13 @@ run_dbt_daily = BashOperator(
 # 2. Cargar datos históricos de taxis a tabla propia (lee del dataset público)
 # 3. Verificar datos históricos de clima
 # 4. Cargar datos históricos de clima
-# 5. Ejecutar dbt silver (lee de taxi_trips_raw_table, no del dataset público)
-# 6. Ejecutar dbt gold
-activate_access >> load_historical_taxi >> check_historical >> trigger_weather_historical >> run_dbt_silver >> run_dbt_gold
+# 1. Verificar si ya existen datos históricos de taxis
+# 2. Exportar dataset público a GCS
+# 3. Crear tabla externa
+# 4. Crear tabla raw (si no existe) e insertar datos filtrados
+# 5. Verificar y cargar datos históricos de clima
+# 6. Ejecutar dbt silver y gold
+check_taxi_data >> create_export_bucket >> export_public_taxi_to_gcs >> create_external_table >> create_raw_table >> load_historical_taxi >> check_historical >> trigger_weather_historical >> run_dbt_silver >> run_dbt_gold
 
 # Dependencias para DAG diario
 trigger_weather_daily >> run_dbt_daily

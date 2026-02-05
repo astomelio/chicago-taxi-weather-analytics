@@ -16,7 +16,7 @@
 
 ### Secret 2: GCP_PROJECT_ID
 - **Name**: `GCP_PROJECT_ID`
-- **Value**: `brave-computer-454217-q4`
+- **Value**: `chicago-taxi-48702`
 
 ### Secret 3: DEVELOPER_EMAIL
 - **Name**: `DEVELOPER_EMAIL`

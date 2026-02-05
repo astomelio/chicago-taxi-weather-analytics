@@ -1,5 +1,5 @@
 -- Queries SQL listas para usar en Looker Studio Dashboard
--- Proyecto: brave-computer-454217-q4
+-- Proyecto: chicago-taxi-48702
 
 -- ============================================
 -- 1. RESUMEN DIARIO (Principal para Dashboard)
@@ -17,7 +17,7 @@ SELECT
   wind_speed,
   humidity,
   total_revenue
-FROM `brave-computer-454217-q4.chicago_taxi_gold.daily_summary`
+FROM `chicago-taxi-48702.chicago_taxi_gold.daily_summary`
 ORDER BY date;
 
 -- ============================================
@@ -31,7 +31,7 @@ SELECT
   AVG(avg_trip_duration_seconds) / 60 as avg_duration_minutes,
   AVG(temperature) as avg_temperature,
   AVG(precipitation) as avg_precipitation
-FROM `brave-computer-454217-q4.chicago_taxi_gold.daily_summary`
+FROM `chicago-taxi-48702.chicago_taxi_gold.daily_summary`
 GROUP BY weather_category
 ORDER BY total_trips DESC;
 
@@ -46,7 +46,7 @@ SELECT
   precipitation,
   avg_trip_duration_seconds / 60 as avg_duration_minutes,
   total_revenue
-FROM `brave-computer-454217-q4.chicago_taxi_gold.daily_summary`
+FROM `chicago-taxi-48702.chicago_taxi_gold.daily_summary`
 ORDER BY total_trips DESC
 LIMIT 20;
 
@@ -58,7 +58,7 @@ SELECT
   weather_category,
   SUM(trips_by_hour) as total_trips,
   AVG(avg_trip_duration_seconds) / 60 as avg_duration_minutes
-FROM `brave-computer-454217-q4.chicago_taxi_gold.taxi_weather_analysis`
+FROM `chicago-taxi-48702.chicago_taxi_gold.taxi_weather_analysis`
 GROUP BY trip_hour, weather_category
 ORDER BY trip_hour, weather_category;
 
@@ -76,7 +76,7 @@ SELECT
   AVG(total_trips) as avg_trips_per_day,
   AVG(avg_trip_duration_seconds) / 60 as avg_duration_minutes,
   AVG(total_revenue) as avg_revenue
-FROM `brave-computer-454217-q4.chicago_taxi_gold.daily_summary`
+FROM `chicago-taxi-48702.chicago_taxi_gold.daily_summary`
 GROUP BY rain_category
 ORDER BY avg_trips_per_day DESC;
 
@@ -90,7 +90,7 @@ SELECT
   AVG(total_trips) as avg_trips_per_day,
   AVG(avg_trip_duration_seconds) / 60 as avg_duration_minutes,
   AVG(temperature) as avg_temperature
-FROM `brave-computer-454217-q4.chicago_taxi_gold.daily_summary`
+FROM `chicago-taxi-48702.chicago_taxi_gold.daily_summary`
 GROUP BY temperature_category
 ORDER BY avg_trips_per_day DESC;
 
@@ -104,7 +104,7 @@ SELECT
   temperature,
   precipitation,
   weather_condition
-FROM `brave-computer-454217-q4.chicago_taxi_gold.daily_summary`
+FROM `chicago-taxi-48702.chicago_taxi_gold.daily_summary`
 ORDER BY date;
 
 -- ============================================
@@ -119,7 +119,7 @@ SELECT
   AVG(total_trips) as avg_trips,
   AVG(avg_trip_duration_seconds) / 60 as avg_duration_minutes,
   AVG(total_revenue) as avg_revenue
-FROM `brave-computer-454217-q4.chicago_taxi_gold.daily_summary`
+FROM `chicago-taxi-48702.chicago_taxi_gold.daily_summary`
 GROUP BY rain_status;
 
 -- ============================================
@@ -138,7 +138,7 @@ SELECT
   END as day_name,
   AVG(total_trips) as avg_trips,
   AVG(avg_trip_duration_seconds) / 60 as avg_duration_minutes
-FROM `brave-computer-454217-q4.chicago_taxi_gold.daily_summary`
+FROM `chicago-taxi-48702.chicago_taxi_gold.daily_summary`
 GROUP BY day_of_week, day_name
 ORDER BY day_of_week;
 
@@ -153,4 +153,4 @@ SELECT
   AVG(temperature) as avg_temperature,
   SUM(total_revenue) as total_revenue,
   AVG(total_revenue) as avg_revenue_per_day
-FROM `brave-computer-454217-q4.chicago_taxi_gold.daily_summary`;
+FROM `chicago-taxi-48702.chicago_taxi_gold.daily_summary`;

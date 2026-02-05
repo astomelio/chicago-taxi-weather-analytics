@@ -14,7 +14,7 @@
    - Busca y click en **"BigQuery"** (está en la lista de conectores)
 
 4. **Seleccionar tu proyecto y tabla**:
-   - En "Select a BigQuery project", busca: `brave-computer-454217-q4`
+   - En "Select a BigQuery project", busca: `chicago-taxi-48702`
    - **Si no aparece**, busca por: `My Project 33994` (ese es el nombre del proyecto)
    - O busca en la lista todos tus proyectos y selecciona el que tenga los datasets `chicago_taxi_*`
    
@@ -227,7 +227,7 @@ SELECT
   wind_speed,
   humidity,
   total_revenue
-FROM `brave-computer-454217-q4.chicago_taxi_gold.daily_summary`
+FROM `chicago-taxi-48702.chicago_taxi_gold.daily_summary`
 ORDER BY date
 ```
 

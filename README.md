@@ -56,8 +56,7 @@ Este proyecto analiza la relación entre las condiciones climáticas y la duraci
 ├── functions/              # Cloud Functions
 │   └── weather_ingestion/
 ├── scripts/               # Scripts auxiliares
-│   ├── setup_airflow.sh
-│   └── verify_tables.py
+│   └── cargar_historicos_via_gcs.sh
 ├── .github/               # CI/CD (solo para infraestructura)
 │   └── workflows/
 └── README.md
@@ -92,15 +91,9 @@ Este proyecto analiza la relación entre las condiciones climáticas y la duraci
    - Trigger el DAG `chicago_taxi_historical_ingestion`
    - Espera a que complete (puede tardar 20-30 minutos)
    
-   **Opción B: Desde BigQuery Console (Más Fácil)**
-   - Ve a: https://console.cloud.google.com/bigquery?project=tu-project-id
-   - Ejecuta la query del archivo `scripts/CARGAR_DATOS_HISTORICOS.md`
-   - Ver instrucciones completas en ese archivo
-   
-   **Opción C: Script directo (Si tienes gcloud/bq instalado)**
+   **Opción B: Script directo (si tienes gcloud/bq instalado)**
    ```bash
-   export GCP_PROJECT_ID="tu-project-id"
-   ./scripts/load_historical_data.sh
+   ./scripts/cargar_historicos_via_gcs.sh <PROJECT_ID> [REGION]
    ```
    
    El pipeline diario se ejecutará automáticamente después de cargar los históricos
@@ -132,7 +125,7 @@ Ver [airflow/README.md](airflow/README.md) para instrucciones completas.
 
 **Pasos:**
 
-1. **Crear Service Account en GCP** (ver [SETUP.md](SETUP.md#paso-2-crear-service-account-en-gcp))
+1. **Crear Service Account en GCP** (ver `CONFIGURAR_GITHUB.md`)
 
 2. **Configurar Secrets en GitHub**:
    - Ve a: `Settings > Secrets and variables > Actions`
@@ -151,47 +144,9 @@ Ver [airflow/README.md](airflow/README.md) para instrucciones completas.
 - ✅ Despliega toda la infraestructura
 - ✅ Ejecuta modelos dbt
 
-### Opción 2: Despliegue Manual (Alternativa)
+### Crear Dashboard en Looker Studio
 
-```bash
-cd terraform
-terraform init
-terraform plan
-terraform apply
-```
-
-### 3. Configurar dbt
-
-```bash
-cd dbt
-dbt deps
-dbt debug
-```
-
-### 4. Ejecutar Ingesta de Datos del Clima
-
-**Modo Histórico** (primera ejecución - ingesta todos los datos de junio-diciembre 2023):
-```bash
-python functions/weather_ingestion/main.py --historical
-```
-
-**Modo Diario** (ejecución diaria - ingesta solo el día anterior):
-```bash
-python functions/weather_ingestion/main.py
-```
-
-### 5. Ejecutar Transformaciones dbt
-
-```bash
-cd dbt
-dbt run --models silver
-dbt run --models gold
-dbt test
-```
-
-### 6. Crear Dashboard en Looker Studio
-
-Sigue las instrucciones en [DASHBOARD_SETUP.md](DASHBOARD_SETUP.md) para crear el dashboard.
+Sigue las instrucciones en `CREAR_DASHBOARD.md` para crear el dashboard.
 
 **Nota**: Una vez creado, compartir el dashboard con:
 - alejandro@astrafy.io
