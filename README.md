@@ -1,10 +1,8 @@
-# Orbidi Data Engineer Challenge - Chicago Taxi Trips Analysis
+# Orbidi Data Engineer - Chicago Taxi Trips Analysis
 
-> **Nota sobre el Desafío**: Este desafío consta de dos partes:
-> - **Part 1: Design Challenge** - Requiere un diagrama de arquitectura en PDF (entregable separado)
-> - **Part 2: Coding Challenge** - Este repositorio implementa la solución de código
-> 
-> Ver `Orbidi Data Engineer Technical Challenge.pdf` para los detalles completos del desafío.
+**Esta prueba tiene 2 puntos:**
+- **Punto 1**: Documentación y diseño → ver `Part1_Architecture_Design.md`
+- **Punto 2**: Implementación técnica → se explica en este README
 
 ## Descripción del Proyecto
 
@@ -203,27 +201,16 @@ El proyecto incluye pipelines de CI/CD con GitHub Actions para:
 
 Al usar solo 6 meses de datos (junio-diciembre 2023), las consultas permanecen dentro del tier gratuito de Google Cloud para proyectos nuevos.
 
-## Estructura del Desafío
+## Estructura de la prueba
 
-Este proyecto corresponde al **Part 2: Coding Challenge** del desafío técnico de Orbidi.
+### Punto 1
+- Documento y diseño en `Part1_Architecture_Design.md`
+- Guía del diagrama en `Part1_Diagram_Guide.txt`
 
-### Part 1: Design Challenge
-- **Entregable**: Diagrama de arquitectura en PDF
-- **Tema**: Diseño de solución analítica para cliente con múltiples fuentes de datos
-  - Fuentes: PostgreSQL, MySQL, MongoDB, SAP, Salesforce, SurveyMonkey
-  - Objetivos: BI dashboards y modelos ML
-  - Requisitos: Data mesh, GitOps, DataOps, Google Cloud, tecnologías open-source
-  - Dominios de datos: customers, products, maisons (extensible)
-  - Gobernanza federada: acceso, observabilidad, catálogo
-- **Estado**: 📋 **DISEÑO COMPLETADO** - Ver documentación en `Part1_Architecture_Design.md`
-- **Guía para diagrama**: Ver `Part1_Diagram_Guide.txt` para crear el diagrama en draw.io
-- **Ubicación esperada**: `Part1_Architecture_Diagram.pdf` (crear desde la guía)
-
-### Part 2: Coding Challenge (Este Repositorio)
-- **Entregable**: Código en GitHub + Dashboard en Looker Studio
-- **Tema**: Análisis de relación entre clima y duración de viajes en taxis de Chicago
-- **Requisitos**: Terraform, dbt, automatización, BigQuery, Looker Studio
-- **Estado**: ✅ Implementado y funcionando
+### Punto 2 (este README)
+- Código en GitHub + Dashboard en Looker Studio
+- Análisis de relación entre clima y duración de viajes en taxis de Chicago
+- Estado: ✅ Implementado y funcionando
 
 #### Tablas y resultados (resumen)
 
@@ -251,4 +238,4 @@ Este proyecto corresponde al **Part 2: Coding Challenge** del desafío técnico 
 
 ## Autor
 
-Desarrollado como parte del desafío técnico de Data Engineer de Orbidi.
+Desarrollado para la prueba técnica de Data Engineer de Orbidi.
