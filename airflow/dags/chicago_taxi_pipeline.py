@@ -371,6 +371,23 @@ run_dbt_gold = BashOperator(
     dag=historical_dag,
 )
 
+run_dbt_tests = BashOperator(
+    task_id='run_dbt_tests',
+    bash_command="""
+    cd /home/airflow/gcs/data/dbt && \
+    export GCP_PROJECT_ID='{{ params.project_id }}' && \
+    export DBT_DATASET=chicago_taxi_silver && \
+    unset GOOGLE_APPLICATION_CREDENTIALS || true && \
+    python3 -m pip install --user dbt-bigquery 2>/dev/null || echo "dbt ya instalado o error en instalación" && \
+    dbt test --profiles-dir /home/airflow/gcs/data/dbt
+    """,
+    params={
+        'project_id': PROJECT_ID,
+    },
+    pool=None,
+    dag=historical_dag,
+)
+
 # Tareas para DAG diario
 trigger_weather_daily = PythonOperator(
     task_id='trigger_weather_daily',
@@ -398,6 +415,22 @@ run_dbt_daily = BashOperator(
     dag=daily_dag,
 )
 
+run_dbt_daily_tests = BashOperator(
+    task_id='run_dbt_daily_tests',
+    bash_command="""
+    cd /home/airflow/gcs/data/dbt && \
+    export GCP_PROJECT_ID='{{ params.project_id }}' && \
+    export DBT_DATASET=chicago_taxi_silver && \
+    unset GOOGLE_APPLICATION_CREDENTIALS || true && \
+    python3 -m pip install --user dbt-bigquery 2>/dev/null || echo "dbt ya instalado o error en instalación" && \
+    dbt test --profiles-dir /home/airflow/gcs/data/dbt
+    """,
+    params={
+        'project_id': PROJECT_ID,
+    },
+    dag=daily_dag,
+)
+
 # Dependencias para DAG histórico
 # 1. Activar acceso al dataset público (intenta activar si no está activado)
 # 2. Cargar datos históricos de taxis a tabla propia (lee del dataset público)
@@ -409,7 +442,7 @@ run_dbt_daily = BashOperator(
 # 4. Crear tabla raw (si no existe) e insertar datos filtrados
 # 5. Verificar y cargar datos históricos de clima
 # 6. Ejecutar dbt silver y gold
-check_taxi_data >> create_export_bucket >> export_public_taxi_to_gcs >> create_external_table >> create_raw_table >> load_historical_taxi >> check_historical >> trigger_weather_historical >> run_dbt_silver >> run_dbt_gold
+check_taxi_data >> create_export_bucket >> export_public_taxi_to_gcs >> create_external_table >> create_raw_table >> load_historical_taxi >> check_historical >> trigger_weather_historical >> run_dbt_silver >> run_dbt_gold >> run_dbt_tests
 
 # Dependencias para DAG diario
-trigger_weather_daily >> run_dbt_daily
+trigger_weather_daily >> run_dbt_daily >> run_dbt_daily_tests
