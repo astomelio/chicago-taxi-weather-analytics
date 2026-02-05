@@ -73,9 +73,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: [detect-changes, prepare-function-zip]
     if: needs.detect-changes.outputs.terraform == 'true' || needs.detect-changes.outputs.functions == 'true'
-    name: Deploy Infrastructure with Terraform
-    runs-on: ubuntu-latest
-    needs: prepare-function-zip
     defaults:
       run:
         working-directory: ./terraform
